@@ -43,7 +43,7 @@ CONVERT_IMAGE="${CONVERT_IMAGE:-nvidia/cuda:13.1.2-runtime-ubuntu24.04}"
 GPU_SELECT="${GPU_SELECT:-all}"
 DEVICE="${DEVICE:-cuda}"
 
-# Optional: pin the heavy steps to a CPU set, e.g. CPUSET="48-55,104-111".
+# Optional: pin the heavy steps to a CPU set, e.g. CPUSET="0-7".
 CPUSET="${CPUSET:-}"
 
 # ── Derived ──────────────────────────────────────────────────────────────────

@@ -76,8 +76,8 @@ cd ninfer-qwen-uncensored
 ./build.sh
 ```
 
-The artifact lands at `work/out/qwen3_8_27b_uncensored.ninfer`. On a warm cache
-(weights already downloaded) the quantise step is roughly ten minutes on a
+The artifact lands at `work/out/qwen3_8_27b_uncensored.ninfer`. Once the base
+weights have been downloaded, the quantise step is roughly ten minutes on a
 mid-range CUDA card.
 
 Common overrides (all optional, shown with defaults):
@@ -86,7 +86,7 @@ Common overrides (all optional, shown with defaults):
 W="$(pwd)/work"                 # working directory
 DEVICE=cuda                     # or: cpu
 GPU_SELECT=all                  # or: device=GPU-<uuid>  (nvidia-smi -L)
-CPUSET=                         # e.g. 48-55,104-111 to pin the heavy steps
+CPUSET=                         # e.g. 0-7 to pin the heavy steps
 BASE_REPO=JonathanColetti/Qwen3.8-27B-Uncensored
 NINFER_COMMIT=b2b96bae4dd88f95b9ea8126d68fae3b88caa374
 ```
@@ -94,8 +94,8 @@ NINFER_COMMIT=b2b96bae4dd88f95b9ea8126d68fae3b88caa374
 Example — quantise on one specific card, pinned to a CPU block:
 
 ```bash
-GPU_SELECT="device=GPU-f0a12b84-81c2-d26e-9522-80e0bb8f11a8" \
-CPUSET="48-55,104-111" ./build.sh
+GPU_SELECT="device=GPU-<uuid>" \
+CPUSET="0-7" ./build.sh
 ```
 
 ---
