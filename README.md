@@ -14,6 +14,11 @@ to produce that artifact, deterministically and from scratch.
 There is no prebuilt artifact to download here — the weights are large and the
 point is that **you rebuild it yourself from pinned inputs**. One command does it.
 
+The repo also carries a second build,
+[Ornith-1.5-35B-A3B](#second-build-ornith-15-35b-a3b-moe-mtp--dflash): shisa-ai's
+MoE model with a distilled MTP head, converted through NInfer's
+`qwen3_6_35b_a3b` target.
+
 ---
 
 ## What you get
@@ -191,6 +196,78 @@ difference is the base weights this repo feeds the converter.
 
 ---
 
+## Second build: Ornith-1.5-35B-A3B (MoE, MTP + DFlash)
+
+[`build-ornith.sh`](build-ornith.sh) builds a second artifact from the same
+pinned converter commit:
+[`shisa-ai/Ornith-1.5-35B-A3B-MTP`](https://huggingface.co/shisa-ai/Ornith-1.5-35B-A3B-MTP),
+Ornith-1.5-35B-A3B with an MTP speculation head distilled from
+Qwen3.6-35B-A3B. This one is not abliterated — it's here because the checkpoint
+is an exact drop-in for NInfer's registered `qwen3_6_35b_a3b` target and the
+same build pattern applies.
+
+| | |
+|---|---|
+| **Output** | `ornith_1_5_35b_a3b.ninfer` (~21.22 GiB) |
+| **Base model** | `shisa-ai/Ornith-1.5-35B-A3B-MTP` — BF16, 16 shards + `model-mtp.safetensors` (~72 GB) |
+| **DFlash companion** | [`z-lab/Qwen3.6-35B-A3B-DFlash`](https://huggingface.co/z-lab/Qwen3.6-35B-A3B-DFlash) (~1.7 GB) |
+| **Official frontend** | `Qwen/Qwen3.6-35B-A3B` — pinned in [`frontend-qwen3_6_35b_a3b.sha256`](frontend-qwen3_6_35b_a3b.sha256) |
+| **Architecture** | 35B MoE (256 experts, 8 active per token), 40 hybrid linear/full-attention layers, vision tower, 1-layer MTP, 262144 context |
+| **Recipe** | groupwise-int `qwen3_6_35b_a3b-v2` |
+
+Why this works: the converter's preflight demands an exact tensor contract
+(names, shapes, dtypes — no extras) plus its pinned config values, but it never
+hashes the weights themselves. Ornith's merged checkpoint matches the official
+Qwen3.6-35B-A3B inventory tensor-for-tensor: all 1045 names, shapes and dtypes
+are identical, including the 19-tensor MTP head in `model-mtp.safetensors`.
+That was verified against both repos' safetensors headers before this script
+was written.
+
+```bash
+./build-ornith.sh
+```
+
+Differences from the 27B build:
+
+- **More disk.** ~110 GB free (72 GB base + 1.7 GB DFlash + 21 GB artifact +
+  headroom). Uses `work-ornith/` so it won't collide with a 27B build in the
+  same checkout.
+- **Two weight inputs.** The converter requires `--dflash-model`; the artifact
+  embeds the DFlash draft model alongside the MTP head.
+- **Chat template.** Ornith ships five of the six frontend files byte-identical
+  to the official ones. Its `chat_template.jinja` differs: it keeps prior-turn
+  `<think>` blocks in the prompt, while the official template strips them from
+  older turns. The converter pins the official template, so the artifact gets
+  official behaviour. That's the standard Qwen convention; expect no practical
+  difference.
+- **Speculation heads.** The MTP head was distilled for Ornith specifically, so
+  MTP acceptance should be close to the official model's (~80%, ~3.4
+  tokens/round at window 3). The DFlash head was trained against *base*
+  Qwen3.6-35B-A3B, not Ornith — speculation is always verified by the target
+  model so outputs are unaffected, but acceptance (and therefore speed) may dip
+  on a finetune. Benchmark both on your workload.
+
+Serving on the 5090, with MTP (supports vision):
+
+```bash
+ninfer-serve ornith_1_5_35b_a3b.ninfer \
+    --model-id default \
+    --host 127.0.0.1 --port 6107 \
+    --max-context 262144 \
+    --max-concurrency 4 \
+    --kv-capacity auto --kv-dtype int8 \
+    --spec mtp --draft-tokens 3 --lm-head-draft \
+    --vision
+```
+
+For text-only serving, try `--spec dflash --draft-tokens 7` instead (MTP and
+DFlash are mutually exclusive, and DFlash cannot be combined with `--vision`).
+For reference, the official `qwen3_6_35b_a3b` artifact measures ~593 tok/s
+single-stream decode with MTP=3 on a 5090, and ~1,314 aggregate tok/s at
+concurrency 8.
+
+---
+
 ## Responsible use
 
 The base model is already abliterated and already public; this repo does not
@@ -207,14 +284,18 @@ operate. Provided as-is, for research and self-hosting.
 ## Layout
 
 ```
-build.sh             end-to-end reproducible build (four containerised steps)
-verify_frontend.py   sha256 pin check for the grafted frontend resources
-frontend.sha256      the six official-frontend pins (mirror the converter's)
-README.md            this file
+build.sh                          Qwen3.8-27B uncensored build (four containerised steps)
+build-ornith.sh                   Ornith-1.5-35B-A3B MoE build (five containerised steps)
+verify_frontend.py                sha256 pin check for the grafted frontend resources
+frontend.sha256                   the six official Qwen3.8-27B frontend pins
+frontend-qwen3_6_35b_a3b.sha256   the six official Qwen3.6-35B-A3B frontend pins
+README.md                         this file
 ```
 
 ## Credits
 
-- [NInfer](https://github.com/Neroued/ninfer) — the 5090 engine, converter, and groupwise-int recipe.
-- [Qwen](https://huggingface.co/Qwen) — the Qwen3.8-27B base model and frontend resources.
+- [NInfer](https://github.com/Neroued/ninfer) — the 5090 engine, converter, and groupwise-int recipes.
+- [Qwen](https://huggingface.co/Qwen) — the Qwen3.8-27B and Qwen3.6-35B-A3B base models and frontend resources.
 - [`JonathanColetti/Qwen3.8-27B-Uncensored`](https://huggingface.co/JonathanColetti/Qwen3.8-27B-Uncensored) — the abliterated base weights.
+- [`shisa-ai/Ornith-1.5-35B-A3B-MTP`](https://huggingface.co/shisa-ai/Ornith-1.5-35B-A3B-MTP) — Ornith with the distilled MTP head, merged into the Qwen3.6-35B-A3B checkpoint layout.
+- [`z-lab/Qwen3.6-35B-A3B-DFlash`](https://huggingface.co/z-lab/Qwen3.6-35B-A3B-DFlash) — the DFlash draft model.

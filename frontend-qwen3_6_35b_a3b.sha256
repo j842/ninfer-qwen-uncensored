@@ -1,0 +1,17 @@
+# Official Qwen3.6-35B-A3B frontend resources, sha256-pinned.
+#
+# These are the six files the NInfer converter (RECIPE_ID qwen3_6_35b_a3b-v2,
+# NINFER_COMMIT b2b96bae4dd88f95b9ea8126d68fae3b88caa374) verifies against its
+# own built-in OFFICIAL_RESOURCE_SHA256 table. The Ornith checkpoint already
+# ships five of the six byte-identically; only chat_template.jinja differs
+# (Ornith's variant keeps prior-turn <think> blocks). The build grafts all six
+# from Qwen/Qwen3.6-35B-A3B so the converter's preflight passes.
+#
+# If you bump NINFER_COMMIT and the converter's pins change, update these to
+# match tools/convert/qwen3_6/common/official_resources.py at that commit.
+5f9e4d4901a92b997e463c1f46055088b6cca5ca61a6522d1b9f64c4bb81cb42  tokenizer.json
+5186f0defcd7f232382c7f0aebcd2252d073bb921ab240e407b7ae8745d2b29b  tokenizer_config.json
+e84f32a23fdda27689f868aa4a1a5621f41133e51a48d7f3efcbea2839574259  chat_template.jinja
+e70c136c1b78ddc1fb0905bac8e733a4dc448d4f852a5dd75143fffc70be550e  generation_config.json
+27225450ac9c6529872ee1924fcb0962ff5634834f817040f444118116f4e516  preprocessor_config.json
+7768af27c1fafa9cc9011c1dc20067e03f8915e03b63504550e11d5066986d13  video_preprocessor_config.json
