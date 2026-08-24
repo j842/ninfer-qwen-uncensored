@@ -105,10 +105,17 @@ PY'
 # converter refuses anything whose sha does not match its built-in pins, so we
 # overwrite all six with the official ones, then verify.
 echo "=== [4/5] graft official frontend from ${FRONTEND_REPO}"
-for f in tokenizer.json tokenizer_config.json chat_template.jinja \
-         generation_config.json preprocessor_config.json video_preprocessor_config.json; do
-    curl -fsSL -o "ckpt/$f" "https://huggingface.co/${FRONTEND_REPO}/resolve/main/$f"
-done
+# Runs in a container because the download step leaves ckpt/ root-owned under
+# rootful Docker, so a host-side curl cannot overwrite the six files.
+docker run --rm -i "${CPUSET_FLAG[@]}" -v "$W/ckpt:/ckpt" python:3.12-slim python3 - << PY
+import urllib.request
+for f in ["tokenizer.json", "tokenizer_config.json", "chat_template.jinja",
+          "generation_config.json", "preprocessor_config.json",
+          "video_preprocessor_config.json"]:
+    urllib.request.urlretrieve(
+        "https://huggingface.co/${FRONTEND_REPO}/resolve/main/" + f, "/ckpt/" + f)
+    print("grafted", f)
+PY
 python3 "$REPO_DIR/verify_frontend.py" ckpt "$REPO_DIR/frontend-qwen3_6_35b_a3b.sha256" \
     || { echo "frontend pin check failed — see README (pins may have changed with NINFER_COMMIT)"; exit 1; }
 
