@@ -54,6 +54,11 @@ DEVICE="${DEVICE:-cuda}"
 # Optional: pin the heavy steps to a CPU set, e.g. CPUSET="0-7".
 CPUSET="${CPUSET:-}"
 
+# Optional: a HuggingFace token for the weight downloads. Not required — all
+# inputs are public — but authenticated requests get higher rate limits, which
+# matters for the ~72 GB base pull.
+export HF_TOKEN="${HF_TOKEN:-}"
+
 # ── Derived ──────────────────────────────────────────────────────────────────
 
 CPUSET_FLAG=(); [ -n "$CPUSET" ] && CPUSET_FLAG=(--cpuset-cpus "$CPUSET")
@@ -74,7 +79,7 @@ fi
 
 # ── [2/5] Base weights (BF16, ~72 GB, resumable) ─────────────────────────────
 echo "=== [2/5] base weights: ${BASE_REPO}"
-docker run --rm "${CPUSET_FLAG[@]}" -v "$W/ckpt:/ckpt" python:3.12-slim bash -ec '
+docker run --rm "${CPUSET_FLAG[@]}" -e HF_TOKEN -v "$W/ckpt:/ckpt" python:3.12-slim bash -ec '
     pip -q install "huggingface_hub[hf_transfer]" >/dev/null
     HF_HUB_ENABLE_HF_TRANSFER=1 python3 - << PY
 from huggingface_hub import snapshot_download
@@ -85,7 +90,7 @@ PY'
 
 # ── [3/5] DFlash companion weights (~1.7 GB) ─────────────────────────────────
 echo "=== [3/5] dflash weights: ${DFLASH_REPO}"
-docker run --rm "${CPUSET_FLAG[@]}" -v "$W/dflash:/dflash" python:3.12-slim bash -ec '
+docker run --rm "${CPUSET_FLAG[@]}" -e HF_TOKEN -v "$W/dflash:/dflash" python:3.12-slim bash -ec '
     pip -q install "huggingface_hub[hf_transfer]" >/dev/null
     HF_HUB_ENABLE_HF_TRANSFER=1 python3 - << PY
 from huggingface_hub import snapshot_download
