@@ -46,10 +46,17 @@ DEVICE="${DEVICE:-cuda}"
 # Optional: pin the heavy steps to a CPU set, e.g. CPUSET="0-7".
 CPUSET="${CPUSET:-}"
 
+# Optional: a HuggingFace token for the weight download. Not required — all
+# inputs are public — but authenticated requests get higher rate limits, which
+# matters for the ~55 GB base pull.
+export HF_TOKEN="${HF_TOKEN:-}"
+
 # ── Derived ──────────────────────────────────────────────────────────────────
 
 CPUSET_FLAG=(); [ -n "$CPUSET" ] && CPUSET_FLAG=(--cpuset-cpus "$CPUSET")
 GPU_FLAG=();    [ "$DEVICE" = "cuda" ] && GPU_FLAG=(--gpus "$GPU_SELECT")
+
+REPO_DIR="$(cd "$(dirname "$0")" && pwd)"
 
 mkdir -p "$W"/ckpt "$W"/out
 cd "$W"
@@ -64,7 +71,7 @@ fi
 
 # ── [2/4] Base weights (abliterated BF16, ~55 GB, resumable) ─────────────────
 echo "=== [2/4] base weights: ${BASE_REPO}"
-docker run --rm "${CPUSET_FLAG[@]}" -v "$W/ckpt:/ckpt" python:3.12-slim bash -ec '
+docker run --rm "${CPUSET_FLAG[@]}" -e HF_TOKEN -v "$W/ckpt:/ckpt" python:3.12-slim bash -ec '
     pip -q install "huggingface_hub[hf_transfer]" >/dev/null
     HF_HUB_ENABLE_HF_TRANSFER=1 python3 - << PY
 from huggingface_hub import snapshot_download
@@ -78,11 +85,18 @@ PY'
 # converter refuses anything whose sha does not match its built-in pins, so we
 # overwrite the six frontend resources with the official ones, then verify.
 echo "=== [3/4] graft official frontend from ${FRONTEND_REPO}"
-for f in tokenizer.json tokenizer_config.json chat_template.jinja \
-         generation_config.json preprocessor_config.json video_preprocessor_config.json; do
-    curl -fsSL -o "ckpt/$f" "https://huggingface.co/${FRONTEND_REPO}/resolve/main/$f"
-done
-python3 "$(dirname "$0")/verify_frontend.py" ckpt \
+# Runs in a container because the download step leaves ckpt/ root-owned under
+# rootful Docker, so a host-side curl cannot overwrite the six files.
+docker run --rm -i "${CPUSET_FLAG[@]}" -v "$W/ckpt:/ckpt" python:3.12-slim python3 - << PY
+import urllib.request
+for f in ["tokenizer.json", "tokenizer_config.json", "chat_template.jinja",
+          "generation_config.json", "preprocessor_config.json",
+          "video_preprocessor_config.json"]:
+    urllib.request.urlretrieve(
+        "https://huggingface.co/${FRONTEND_REPO}/resolve/main/" + f, "/ckpt/" + f)
+    print("grafted", f)
+PY
+python3 "$REPO_DIR/verify_frontend.py" ckpt \
     || { echo "frontend pin check failed — see README (pins may have changed with NINFER_COMMIT)"; exit 1; }
 
 # ── [4/4] Convert → groupwise-int .ninfer artifact ───────────────────────────
