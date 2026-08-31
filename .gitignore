@@ -216,3 +216,8 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Build working dirs (build.sh / build-ornith.sh) and model artifacts
+work/
+work-ornith/
+*.ninfer

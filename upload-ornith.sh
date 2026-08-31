@@ -15,10 +15,11 @@ set -euo pipefail
 
 # ── Configuration (override via environment) ─────────────────────────────────
 W="${W:-$(pwd)/work-ornith}"                 # build-ornith.sh working dir
-OUT_FILE="${OUT_FILE:-ornith_1_5_35b_a3b.ninfer}"
-HF_REPO="${HF_REPO:-}"                       # e.g. you/Ornith-1.5-35B-A3B-NInfer
-PRIVATE="${PRIVATE:-false}"                  # true = create the repo private
+export OUT_FILE="${OUT_FILE:-ornith_1_5_35b_a3b.ninfer}"
+export HF_REPO="${HF_REPO:-}"                # e.g. you/Ornith-1.5-35B-A3B-NInfer
+export PRIVATE="${PRIVATE:-false}"           # true = create the repo private
 : "${HF_TOKEN:?set HF_TOKEN to a write-scope token (hf.co/settings/tokens)}"
+export HF_TOKEN                              # bare -e flags only pass exported vars
 
 REPO_DIR="$(cd "$(dirname "$0")" && pwd)"
 
@@ -28,8 +29,8 @@ REPO_DIR="$(cd "$(dirname "$0")" && pwd)"
 docker run --rm -e HF_TOKEN -e HF_REPO -e PRIVATE -e OUT_FILE \
     -v "$W/out:/out:ro" -v "$REPO_DIR/hf-ornith:/card:ro" \
     python:3.12-slim bash -ec '
-    pip -q install "huggingface_hub[hf_transfer]" >/dev/null
-    export HF_HUB_ENABLE_HF_TRANSFER=1
+    pip -q install huggingface_hub >/dev/null
+    export HF_XET_HIGH_PERFORMANCE=1
     python3 - << "PY"
 import os
 from huggingface_hub import HfApi
