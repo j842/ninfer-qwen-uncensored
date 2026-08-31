@@ -8,13 +8,19 @@ artifacts, for serving on an RTX 5090:
 - **[Build 2: Ornith-1.5-35B-A3B](#build-2-ornith-15-35b-a3b)** — shisa-ai's
   MoE model with a distilled MTP head (`./build-ornith.sh`)
 
+> **📦 Don't want to build? The Ornith artifact is published on Hugging Face:**
+> **[huggingJDE/Ornith-1.5-35B-A3B-NInfer](https://huggingface.co/huggingJDE/Ornith-1.5-35B-A3B-NInfer)**
+> — download `ornith_1_5_35b_a3b.ninfer` and go straight to the serving command
+> in [Build 2](#build-2-ornith-15-35b-a3b). Build 1 stays build-it-yourself.
+
 NInfer is a C++/CUDA inference engine built exclusively for the 5090 (Blackwell,
 `sm_120a`). It does not load Hugging Face checkpoints — it serves a `.ninfer`
 artifact: one file carrying the quantised weights, the MTP speculation head, the
 vision tower, and the tokenizer/chat-template frontend. Both builds run NInfer's
-own converter over public weights, deterministically and from scratch. There is
-no prebuilt artifact to download — the point is that **you rebuild it yourself
-from pinned inputs**. One command each.
+own converter over public weights, deterministically and from scratch — **you
+can rebuild either yourself from pinned inputs**, one command each. The Ornith
+artifact is also prebuilt and downloadable (see above); the uncensored build is
+deliberately not redistributed.
 
 ## Requirements
 
@@ -148,13 +154,25 @@ MoE, MTP + DFlash. Not abliterated — it's here because the checkpoint is an
 exact drop-in for NInfer's registered `qwen3_6_35b_a3b` target and the same
 build pattern applies.
 
+**Prebuilt:** this exact artifact is published at
+[huggingJDE/Ornith-1.5-35B-A3B-NInfer](https://huggingface.co/huggingJDE/Ornith-1.5-35B-A3B-NInfer)
+— download it instead of building, then verify:
+
+```
+sha256  bc58fa4900d99560904bb94987704e712091a8e72a1a91d07242313631a919a3
+bytes   22783246080
+file    ornith_1_5_35b_a3b.ninfer
+```
+
+Or build it yourself:
+
 ```bash
 ./build-ornith.sh   # → work-ornith/out/ornith_1_5_35b_a3b.ninfer
 ```
 
 | | |
 |---|---|
-| **Output** | `ornith_1_5_35b_a3b.ninfer` (~21.22 GiB) |
+| **Output** | `ornith_1_5_35b_a3b.ninfer` (~21.22 GiB) — [prebuilt on HF](https://huggingface.co/huggingJDE/Ornith-1.5-35B-A3B-NInfer) |
 | **Base model** | [`shisa-ai/Ornith-1.5-35B-A3B-MTP`](https://huggingface.co/shisa-ai/Ornith-1.5-35B-A3B-MTP) — BF16, 16 shards + `model-mtp.safetensors`, ~72 GB. MTP head distilled from Qwen3.6-35B-A3B |
 | **DFlash companion** | [`z-lab/Qwen3.6-35B-A3B-DFlash`](https://huggingface.co/z-lab/Qwen3.6-35B-A3B-DFlash) (~1.7 GB) |
 | **Official frontend** | `Qwen/Qwen3.6-35B-A3B` — pinned in [`frontend-qwen3_6_35b_a3b.sha256`](frontend-qwen3_6_35b_a3b.sha256) |
@@ -205,6 +223,8 @@ concurrency 8.
 
 ### Publishing to Hugging Face
 
+The reference artifact is live at
+[huggingJDE/Ornith-1.5-35B-A3B-NInfer](https://huggingface.co/huggingJDE/Ornith-1.5-35B-A3B-NInfer).
 Every input is Apache-2.0 or MIT, so redistributing the artifact is fine with
 attribution. [`upload-ornith.sh`](upload-ornith.sh) uploads the artifact, its
 conversion report, and the model card / LICENSE / NOTICE from
