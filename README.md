@@ -62,7 +62,9 @@ checkpoint.
 ## Requirements
 
 - **Docker** with the **NVIDIA container runtime** (`--gpus` support). Every
-  heavy step runs in a pinned container; nothing is installed on the host.
+  heavy step runs in a pinned container; nothing is installed on the host. The
+  host itself only needs `curl` (to fetch the converter tarball) and `python3`
+  (to run the sha256 pin check).
 - A CUDA GPU with **~11 GB of free VRAM** for the quantise step. This does *not*
   have to be the 5090 you serve on — the reference build quantised on a 5060 Ti.
   No GPU? Set `DEVICE=cpu` (slower, but it cannot OOM and needs no NVIDIA
@@ -94,7 +96,13 @@ GPU_SELECT=all                  # or: device=GPU-<uuid>  (nvidia-smi -L)
 CPUSET=                         # e.g. 0-7 to pin the heavy steps
 BASE_REPO=JonathanColetti/Qwen3.8-27B-Uncensored
 NINFER_COMMIT=b2b96bae4dd88f95b9ea8126d68fae3b88caa374
+HF_TOKEN=                       # optional; raises HF rate limits on the big pulls
 ```
+
+`HF_TOKEN` is never required — every input is public — but authenticated
+requests get higher Hugging Face rate limits, which matters for the ~55 GB base
+download. `NINFER_REPO`, `FRONTEND_REPO`, `OUT_FILE` and `CONVERT_IMAGE` can
+also be overridden; see the top of `build.sh`.
 
 Example — quantise on one specific card, pinned to a CPU block:
 
@@ -107,17 +115,21 @@ CPUSET="0-7" ./build.sh
 
 ## What the build does
 
-[`build.sh`](build.sh) runs four steps, each in a container:
+[`build.sh`](build.sh) runs four steps:
 
 1. **Fetch the converter.** Downloads the NInfer source tarball at the pinned
-   commit. Only the `tools/convert/...` Python is used — nothing is compiled at
-   build time.
+   commit (plain `curl | tar` on the host). Only the `tools/convert/...` Python
+   is used — nothing is compiled at build time.
 2. **Download the base weights.** Pulls `JonathanColetti/Qwen3.8-27B-Uncensored`
-   into `work/ckpt` (resumable, via `hf_transfer`). This includes the MTP shard,
-   which the converter uses to derive the speculation head.
+   into `work/ckpt` (resumable, via `hf_transfer` in a `python:3.12-slim`
+   container). This includes the MTP shard, which the converter uses to derive
+   the speculation head.
 3. **Graft the official frontend.** Overwrites the six tokenizer/chat-template/
    preprocessor files with the official `Qwen/Qwen3.8-27B` copies, then runs
-   [`verify_frontend.py`](verify_frontend.py) against [`frontend.sha256`](frontend.sha256).
+   [`verify_frontend.py`](verify_frontend.py) against [`frontend.sha256`](frontend.sha256)
+   on the host. The graft itself runs inside a container: under rootful Docker
+   the download step leaves `work/ckpt` root-owned, so a host-side download
+   could not overwrite the six files.
 4. **Convert.** Runs `tools.convert.qwen3_8_27b.convert`, which quantises the
    body to the groupwise-int recipe, builds the proposal head from the
    checkpoint's MTP tensors plus the converter's ranking fixture, keeps the
@@ -284,8 +296,8 @@ operate. Provided as-is, for research and self-hosting.
 ## Layout
 
 ```
-build.sh                          Qwen3.8-27B uncensored build (four containerised steps)
-build-ornith.sh                   Ornith-1.5-35B-A3B MoE build (five containerised steps)
+build.sh                          Qwen3.8-27B uncensored build (four steps)
+build-ornith.sh                   Ornith-1.5-35B-A3B MoE build (five steps)
 verify_frontend.py                sha256 pin check for the grafted frontend resources
 frontend.sha256                   the six official Qwen3.8-27B frontend pins
 frontend-qwen3_6_35b_a3b.sha256   the six official Qwen3.6-35B-A3B frontend pins
