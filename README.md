@@ -203,6 +203,21 @@ reference, the official `qwen3_6_35b_a3b` artifact measures ~593 tok/s
 single-stream decode with MTP=3 on a 5090, ~1,314 aggregate tok/s at
 concurrency 8.
 
+### Publishing to Hugging Face
+
+Every input is Apache-2.0 or MIT, so redistributing the artifact is fine with
+attribution. [`upload-ornith.sh`](upload-ornith.sh) uploads the artifact, its
+conversion report, and the model card / LICENSE / NOTICE from
+[`hf-ornith/`](hf-ornith/) (which preserve the upstream shisa-ai notices):
+
+```bash
+HF_TOKEN=hf_...  ./upload-ornith.sh   # → <you>/Ornith-1.5-35B-A3B-NInfer
+```
+
+Override `HF_REPO` for a different repo name, `PRIVATE=true` to create it
+private. Like the build, it runs in a container (rootful Docker leaves
+`work-ornith/out` root-owned).
+
 ---
 
 ## Responsible use
@@ -221,6 +236,8 @@ operate. Provided as-is, for research and self-hosting.
 ```
 build.sh                          Qwen3.8-27B uncensored build (four steps)
 build-ornith.sh                   Ornith-1.5-35B-A3B MoE build (five steps)
+upload-ornith.sh                  publish the Ornith artifact to Hugging Face
+hf-ornith/                        HF model card, LICENSE, NOTICE for that upload
 verify_frontend.py                sha256 pin check for the grafted frontend resources
 frontend.sha256                   the six official Qwen3.8-27B frontend pins
 frontend-qwen3_6_35b_a3b.sha256   the six official Qwen3.6-35B-A3B frontend pins

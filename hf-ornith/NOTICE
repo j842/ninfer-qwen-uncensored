@@ -1,0 +1,57 @@
+Ornith-1.5-35B-A3B-NInfer
+
+This distribution is a quantised (groupwise-int, recipe qwen3_6_35b_a3b-v2),
+single-file NInfer conversion combining components from four upstream works:
+
+1. Ornith-1.5-35B-A3B-MTP (target model + distilled MTP head)
+   Source: https://huggingface.co/shisa-ai/Ornith-1.5-35B-A3B-MTP
+   License: Apache License 2.0 (Qwen-derived MTP head and the merged
+   distribution); the Ornith target weights remain subject to their upstream
+   MIT license (https://huggingface.co/ornith-ai/Ornith-1.5-35B-A3B).
+   Modifications: weights quantised to NInfer's groupwise-int recipe and
+   repackaged into a single .ninfer artifact.
+
+2. Qwen3.6-35B-A3B frontend resources (tokenizer, chat template, generation
+   and preprocessor configs)
+   Source: https://huggingface.co/Qwen/Qwen3.6-35B-A3B
+   License: Apache License 2.0
+   Modifications: none; embedded verbatim (sha256-verified against the
+   NInfer converter's pins).
+
+3. Qwen3.6-35B-A3B-DFlash draft model
+   Source: https://huggingface.co/z-lab/Qwen3.6-35B-A3B-DFlash
+   License: Apache License 2.0
+   Modifications: embedded into the artifact for optional DFlash speculation.
+
+4. NInfer converter and recipes
+   Source: https://github.com/Neroued/ninfer
+   (commit b2b96bae4dd88f95b9ea8126d68fae3b88caa374)
+   License: Apache License 2.0
+
+Build recipe: https://github.com/j842/ninfer-qwen-uncensored (build-ornith.sh)
+
+----------------------------------------------------------------------------
+Upstream NOTICE from shisa-ai/Ornith-1.5-35B-A3B-MTP, reproduced verbatim:
+----------------------------------------------------------------------------
+
+Ornith-1.5-35B-A3B-MTP
+
+This distribution combines components from two upstream works:
+
+1. Ornith target model
+   Source: https://huggingface.co/ornith-ai/Ornith-1.5-35B-A3B
+   License identified by the upstream model repository: MIT
+   Modifications: the shipped native MTP head was removed and replaced; the
+   target transformer, embeddings, LM head, tokenizer, chat template, and
+   multimodal components are otherwise retained from the upstream checkpoint.
+
+2. Qwen MTP initialization
+   Source: https://huggingface.co/Qwen/Qwen3.6-35B-A3B
+   License: Apache License 2.0
+   Modifications: the Qwen3.6 MTP weights were used to initialize the replacement
+   MTP head, which was then modified through full-vocabulary KL distillation
+   against Ornith-1.5 hidden states and exported as 19 fused BF16 tensors.
+
+The Apache License 2.0 text distributed as LICENSE applies to the Qwen-derived
+replacement MTP head and this combined derivative distribution. The Ornith
+components remain subject to their upstream MIT license and attribution.
