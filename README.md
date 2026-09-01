@@ -1,273 +1,118 @@
 # ninfer-qwen-uncensored
 
-Reproducible builds of two models as single-file [NInfer](https://github.com/Neroued/ninfer)
-artifacts, for serving on an RTX 5090:
+Build recipes and serving notes for the local models we run, one page per model.
 
-- **[Build 1: Qwen3.8-27B Uncensored](#build-1-qwen38-27b-uncensored)** —
-  abliterated Qwen3.8-27B (`./build.sh`)
-- **[Build 2: Ornith-1.5-35B-A3B](#build-2-ornith-15-35b-a3b)** — shisa-ai's
-  MoE model with a distilled MTP head (`./build-ornith.sh`)
+Two of them are reproducible [NInfer](https://github.com/Neroued/ninfer) builds
+for the RTX 5090: one command each, from pinned public inputs, to a single
+`.ninfer` file. The third is Qwen3.8-Flash-Next on SGLang, which has nothing to
+do with NInfer and is here because it is the fastest thing we serve and the
+setup took a while to get right.
 
-> **📦 Don't want to build? The Ornith artifact is published on Hugging Face:**
-> **[huggingJDE/Ornith-1.5-35B-A3B-NInfer](https://huggingface.co/huggingJDE/Ornith-1.5-35B-A3B-NInfer)**
-> — download `ornith_1_5_35b_a3b.ninfer` and go straight to the serving command
-> in [Build 2](#build-2-ornith-15-35b-a3b). Build 1 stays build-it-yourself.
+| Model | Engine / card | Speed | How to get it |
+|---|---|---|---|
+| [Qwen3.8-27B Uncensored](models/qwen3.8-27b-uncensored.md) | NInfer, RTX 5090 | dense 27B, not benchmarked here | build it: `./build.sh` |
+| [Ornith-1.5-35B-A3B](models/ornith-1.5-35b-a3b.md) | NInfer, RTX 5090 | ~593 tok/s single stream | [download](https://huggingface.co/huggingJDE/Ornith-1.5-35B-A3B-NInfer) or `./build-ornith.sh` |
+| [Qwen3.8-Flash-Next](models/qwen3.8-flash-next.md) | SGLang, RTX PRO 6000 | 236-324 tok/s single stream | pull the stock image, patch it at start |
 
-NInfer is a C++/CUDA inference engine built exclusively for the 5090 (Blackwell,
-`sm_120a`). It does not load Hugging Face checkpoints — it serves a `.ninfer`
-artifact: one file carrying the quantised weights, the MTP speculation head, the
-vision tower, and the tokenizer/chat-template frontend. Both builds run NInfer's
-own converter over public weights, deterministically and from scratch — **you
-can rebuild either yourself from pinned inputs**, one command each. The Ornith
-artifact is also prebuilt and downloadable (see above); the uncensored build is
-deliberately not redistributed.
+## [Qwen3.8-27B Uncensored](models/qwen3.8-27b-uncensored.md)
 
-## Requirements
+An abliterated Qwen3.8-27B packed into a 16.96 GiB NInfer artifact: text and
+vision, thinking mode, MTP speculation, 262K context on one 5090. "Abliterated"
+means the refusal direction has been removed from the weights, so it does not
+decline requests the way the instruct model does. That work was already done
+and published by someone else; this repo only re-packages those weights.
+Deliberately not redistributed, so you build it yourself. Takes about ten
+minutes of GPU time on top of a 55 GB download.
+
+## [Ornith-1.5-35B-A3B](models/ornith-1.5-35b-a3b.md)
+
+shisa-ai's 35B MoE (256 experts, 8 active) with an MTP head distilled for it,
+plus the z-lab DFlash draft model, in a 21.22 GiB artifact. Not abliterated. It
+is in this repo because the checkpoint is an exact drop-in for NInfer's
+registered `qwen3_6_35b_a3b` target, so the same build pattern applies with one
+extra download step. Every input is Apache-2.0 or MIT, so the built artifact is
+published: **[huggingJDE/Ornith-1.5-35B-A3B-NInfer](https://huggingface.co/huggingJDE/Ornith-1.5-35B-A3B-NInfer)**.
+By a distance the faster of the two 5090 builds.
+
+## [Qwen3.8-Flash-Next](models/qwen3.8-flash-next.md)
+
+Not NInfer, not a 5090, and there is no artifact to download. The Qwen4
+architecture preview (180B total, 6B active, 512 experts, 262K context) served
+by SGLang on one RTX PRO 6000 Blackwell, with a seven-piece patch stack applied
+to the stock image at container start. 257 tok/s prose and 324 tok/s code at
+shallow depth, still 236 / 288 at 250K tokens of context. The page covers the
+patch stack, the full launch command, the measured VRAM budget, and the silent
+output corruption that a health check will not catch. It also has the RTX 5090
+fallback: llama.cpp with all 512 experts streaming from system RAM, about 43
+tok/s.
+
+## Building the NInfer artifacts
+
+Both builds have the same requirements.
 
 - **Docker** with the **NVIDIA container runtime** (`--gpus` support). Every
   heavy step runs in a pinned container; the host itself only needs `curl` and
-  `python3`.
-- A CUDA GPU with **~11 GB of free VRAM** for the quantise step — any card, not
+  `python3`. No Docker? [`get-docker.sh`](get-docker.sh) is the official
+  convenience script from get.docker.com, vendored so the build has no other
+  host dependency: `sudo sh get-docker.sh`.
+- A CUDA GPU with **~11 GB of free VRAM** for the quantise step. Any card, not
   necessarily the 5090 you serve on (the reference build used a 5060 Ti). No
   GPU? `DEVICE=cpu` works: slower, but it cannot OOM and needs no NVIDIA
   runtime.
-- **Disk:** ~90 GB free for build 1, ~110 GB for build 2.
-- To *serve* the result you need an actual **RTX 5090** — NInfer targets
+- Free disk: about 90 GB for Qwen3.8-27B, about 110 GB for Ornith.
+- To *serve* the result you need an actual **RTX 5090**. NInfer targets
   `sm_120a` only.
 
----
-
-## Build 1: Qwen3.8-27B Uncensored
-
-```bash
-./build.sh        # → work/out/qwen3_8_27b_uncensored.ninfer
-```
-
-| | |
-|---|---|
-| **Output** | `qwen3_8_27b_uncensored.ninfer` (~16.96 GiB / 18,210,531,328 bytes) |
-| **Base model** | [`JonathanColetti/Qwen3.8-27B-Uncensored`](https://huggingface.co/JonathanColetti/Qwen3.8-27B-Uncensored) — abliterated BF16, 12 shards + `model-mtp.safetensors`, ~55 GB |
-| **Architecture** | Qwen3.5-family multimodal: 27B, hidden 5120, 64 layers, 24 heads, vocab 248320, vision tower + 1-layer MTP |
-| **Quantisation** | Groupwise-int recipe `qwen3_8_27b-v1` (Q4/Q5/Q6 body; token embedding + output head `W8G32_F16S`) |
-| **Capabilities** | Text + vision, thinking mode, MTP speculation |
-
-"Abliterated" means the base model's refusal direction has been removed from its
-weights, so it does not decline requests the way the instruct model does. That
-work is already done and public — this repo only re-packages those weights into
-NInfer's format. See [Responsible use](#responsible-use).
-
-### How the build works
-
-Everything is pinned so two clean runs consume the same bytes: NInfer converter
-commit `b2b96bae4dd88f95b9ea8126d68fae3b88caa374` (2026-08-18), the base repo
-above, the official `Qwen/Qwen3.8-27B` frontend (sha256-pinned in
-[`frontend.sha256`](frontend.sha256)), and the
-`nvidia/cuda:13.1.2-runtime-ubuntu24.04` convert image. Four steps:
-
-1. **Fetch the converter** — the NInfer source tarball at the pinned commit
-   (`curl | tar` on the host). Only the `tools/convert/...` Python is used;
-   nothing is compiled.
-2. **Download the base weights** into `work/ckpt` (resumable, `hf_transfer`, in
-   a `python:3.12-slim` container). Includes the MTP shard the converter uses to
-   derive the speculation head.
-3. **Graft the official frontend.** The abliterated repo ships
-   trivially-different tokenizer/config copies, and the converter's preflight
-   sha-pins six frontend files — so the build overwrites them with the official
-   `Qwen/Qwen3.8-27B` copies, then verifies via
-   [`verify_frontend.py`](verify_frontend.py). The graft runs in a container
-   because rootful Docker leaves `work/ckpt` root-owned after step 2.
-4. **Convert.** `tools.convert.qwen3_8_27b.convert` quantises the body, builds
-   the proposal head from the MTP tensors plus the converter's ranking fixture,
-   keeps the vision tower, and writes the `.ninfer` file plus a
-   `*.conversion.json` report. Roughly ten minutes on a mid-range CUDA card.
-
-**The one gotcha:** the converter stamps its git revision into the report by
-shelling out to `git rev-parse HEAD`. The stock CUDA image has no `git`, so the
-last step raises `FileNotFoundError: 'git'` — *after* the artifact is fully
-written, making a successful build look failed. `build.sh` installs `git` in the
-convert container; in a tarball checkout the stamp is simply empty, which is
-fine. Keep `git` in the container if you adapt this pipeline.
-
-Common overrides (all optional, shown with defaults):
-
-```bash
-W="$(pwd)/work"                 # working directory
-DEVICE=cuda                     # or: cpu
-GPU_SELECT=all                  # or: device=GPU-<uuid>  (nvidia-smi -L)
-CPUSET=                         # e.g. 0-7 to pin the heavy steps
-BASE_REPO=JonathanColetti/Qwen3.8-27B-Uncensored
-NINFER_COMMIT=b2b96bae4dd88f95b9ea8126d68fae3b88caa374
-HF_TOKEN=                       # optional; raises HF rate limits on the big pulls
-```
-
-`NINFER_REPO`, `FRONTEND_REPO`, `OUT_FILE` and `CONVERT_IMAGE` can also be
-overridden; see the top of `build.sh`.
-
-### Reproducibility
-
-The reference build produces:
-
-```
-sha256  714565ed29db4415322e9bc13a3464dc1fd8fcc911234740a79af67934e49969
-bytes   18210531328
-file    qwen3_8_27b_uncensored.ninfer
-```
-
-Byte-exact output additionally depends on the quantisation device and the
-PyTorch/CUDA build (low-bit rounding differs between GPU/CPU and torch
-versions). To match the reference sha, quantise with `--device cuda` on the
-pinned image. Functionally the artifacts are equivalent either way.
-
-### Serving
-
-The `.ninfer` file is self-contained — point `ninfer-serve` at it (build the
-engine at the pinned commit in a `nvidia/cuda:13.1.2-devel-ubuntu24.04`
-container; see [the NInfer repo](https://github.com/Neroued/ninfer)):
-
-```bash
-ninfer-serve qwen3_8_27b_uncensored.ninfer \
-    --model-id default \
-    --host 127.0.0.1 --port 6106 \
-    --max-context 262144 \
-    --max-concurrency 4 \
-    --kv-capacity auto --kv-dtype int8 \
-    --spec mtp --draft-tokens 3 --lm-head-draft \
-    --vision
-```
-
-`--kv-dtype int8` is what lets full context and the vision tower coexist in
-32 GB — bf16 KV runs out of memory at high context. NInfer exposes an
-OpenAI-compatible `/v1/chat/completions`, but rejects unknown
-`chat_template_kwargs` and has no constrained-JSON mode — a thin translating
-proxy helps if your clients speak those dialects.
-
-To revert to the official (censored) model, serve the official
-[`neroued/Qwen3.8-27B-NInfer`](https://huggingface.co/neroued/Qwen3.8-27B-NInfer)
-artifact instead — same engine, same flags, same recipe; only the base weights
-differ.
-
----
-
-## Build 2: Ornith-1.5-35B-A3B
-
-MoE, MTP + DFlash. Not abliterated — it's here because the checkpoint is an
-exact drop-in for NInfer's registered `qwen3_6_35b_a3b` target and the same
-build pattern applies.
-
-**Prebuilt:** this exact artifact is published at
-[huggingJDE/Ornith-1.5-35B-A3B-NInfer](https://huggingface.co/huggingJDE/Ornith-1.5-35B-A3B-NInfer)
-— download it instead of building, then verify:
-
-```
-sha256  bc58fa4900d99560904bb94987704e712091a8e72a1a91d07242313631a919a3
-bytes   22783246080
-file    ornith_1_5_35b_a3b.ninfer
-```
-
-Or build it yourself:
-
-```bash
-./build-ornith.sh   # → work-ornith/out/ornith_1_5_35b_a3b.ninfer
-```
-
-| | |
-|---|---|
-| **Output** | `ornith_1_5_35b_a3b.ninfer` (~21.22 GiB) — [prebuilt on HF](https://huggingface.co/huggingJDE/Ornith-1.5-35B-A3B-NInfer) |
-| **Base model** | [`shisa-ai/Ornith-1.5-35B-A3B-MTP`](https://huggingface.co/shisa-ai/Ornith-1.5-35B-A3B-MTP) — BF16, 16 shards + `model-mtp.safetensors`, ~72 GB. MTP head distilled from Qwen3.6-35B-A3B |
-| **DFlash companion** | [`z-lab/Qwen3.6-35B-A3B-DFlash`](https://huggingface.co/z-lab/Qwen3.6-35B-A3B-DFlash) (~1.7 GB) |
-| **Official frontend** | `Qwen/Qwen3.6-35B-A3B` — pinned in [`frontend-qwen3_6_35b_a3b.sha256`](frontend-qwen3_6_35b_a3b.sha256) |
-| **Architecture** | 35B MoE (256 experts, 8 active), 40 hybrid linear/full-attention layers, vision tower, 1-layer MTP, 262144 context |
-| **Recipe** | groupwise-int `qwen3_6_35b_a3b-v2` |
-
-Why this works: the converter's preflight demands an exact tensor contract
-(names, shapes, dtypes — no extras) plus its pinned config values, but never
-hashes the weights themselves. Ornith's merged checkpoint matches the official
-Qwen3.6-35B-A3B inventory tensor-for-tensor — all 1045 names, shapes and dtypes,
-including the 19-tensor MTP head — verified against both repos' safetensors
-headers before this script was written.
-
-Differences from build 1 (same converter commit, same step pattern plus a
-DFlash download step, `work-ornith/` working dir):
-
-- **Two weight inputs.** The converter requires `--dflash-model`; the artifact
-  embeds the DFlash draft model alongside the MTP head.
-- **Chat template.** Ornith ships five of the six frontend files byte-identical
-  to the official ones; its `chat_template.jinja` keeps prior-turn `<think>`
-  blocks where the official template strips them. The converter pins the
-  official template, so the artifact gets official (standard Qwen) behaviour —
-  expect no practical difference.
-- **Speculation heads.** The MTP head was distilled for Ornith specifically, so
-  acceptance should be near the official model's (~80%, ~3.4 tokens/round at
-  window 3). The DFlash head was trained against *base* Qwen3.6-35B-A3B —
-  outputs are unaffected (speculation is always verified by the target model)
-  but acceptance, and therefore speed, may dip on a finetune. Benchmark both.
-
-Serving on the 5090, with MTP (supports vision):
-
-```bash
-ninfer-serve ornith_1_5_35b_a3b.ninfer \
-    --model-id default \
-    --host 127.0.0.1 --port 6107 \
-    --max-context 262144 \
-    --max-concurrency 4 \
-    --kv-capacity auto --kv-dtype int8 \
-    --spec mtp --draft-tokens 3 --lm-head-draft \
-    --vision
-```
-
-For text-only serving, try `--spec dflash --draft-tokens 7` instead (MTP and
-DFlash are mutually exclusive; DFlash cannot combine with `--vision`). For
-reference, the official `qwen3_6_35b_a3b` artifact measures ~593 tok/s
-single-stream decode with MTP=3 on a 5090, ~1,314 aggregate tok/s at
-concurrency 8.
-
-### Publishing to Hugging Face
-
-The reference artifact is live at
-[huggingJDE/Ornith-1.5-35B-A3B-NInfer](https://huggingface.co/huggingJDE/Ornith-1.5-35B-A3B-NInfer).
-Every input is Apache-2.0 or MIT, so redistributing the artifact is fine with
-attribution. [`upload-ornith.sh`](upload-ornith.sh) uploads the artifact, its
-conversion report, and the model card / LICENSE / NOTICE from
-[`hf-ornith/`](hf-ornith/) (which preserve the upstream shisa-ai notices):
-
-```bash
-HF_TOKEN=hf_...  ./upload-ornith.sh   # → <you>/Ornith-1.5-35B-A3B-NInfer
-```
-
-Override `HF_REPO` for a different repo name, `PRIVATE=true` to create it
-private. Like the build, it runs in a container (rootful Docker leaves
-`work-ornith/out` root-owned).
-
----
+NInfer is a C++/CUDA inference engine built exclusively for the 5090
+(Blackwell, `sm_120a`). It does not load Hugging Face checkpoints. It serves a
+`.ninfer` artifact: one file carrying the quantised weights, the MTP
+speculation head, the vision tower, and the tokenizer/chat-template frontend.
+Both builds run NInfer's own converter over public weights, deterministically
+and from scratch, so you can rebuild either yourself from pinned inputs.
 
 ## Responsible use
 
-The base model of build 1 is already abliterated and already public; this repo
-does not create that capability, it only converts existing public weights into
-a different serving format for self-hosting. An uncensored model will follow
-instructions a safety-trained one refuses — that makes **you** responsible for
-what you ask it to do and for what you expose it to. Don't put an unfiltered
-model in front of untrusted users or the public without your own guardrails,
-and comply with the base model's and Qwen's licences and with the law where you
-operate. Provided as-is, for research and self-hosting.
+The base model of the Qwen3.8-27B build is already abliterated and already
+public. This repo does not create that capability, it converts existing public
+weights into a different serving format for self-hosting. An uncensored model
+will follow instructions a safety-trained one refuses, which makes **you**
+responsible for what you ask it to do and for what you expose it to. Don't put
+an unfiltered model in front of untrusted users or the public without your own
+guardrails, and comply with the base model's and Qwen's licences and with the
+law where you operate. Provided as-is, for research and self-hosting.
 
 ## Layout
 
 ```
-build.sh                          Qwen3.8-27B uncensored build (four steps)
-build-ornith.sh                   Ornith-1.5-35B-A3B MoE build (five steps)
-upload-ornith.sh                  publish the Ornith artifact to Hugging Face
-hf-ornith/                        HF model card, LICENSE, NOTICE for that upload
-verify_frontend.py                sha256 pin check for the grafted frontend resources
-frontend.sha256                   the six official Qwen3.8-27B frontend pins
-frontend-qwen3_6_35b_a3b.sha256   the six official Qwen3.6-35B-A3B frontend pins
-README.md                         this file
+README.md                          this file
+models/
+  qwen3.8-27b-uncensored.md        NInfer build 1: the abliterated dense 27B
+  ornith-1.5-35b-a3b.md            NInfer build 2: the 35B MoE, published on HF
+  qwen3.8-flash-next.md            SGLang on an RTX PRO 6000 (not NInfer)
+build.sh                           Qwen3.8-27B uncensored build (four steps)
+build-ornith.sh                    Ornith-1.5-35B-A3B MoE build (five steps)
+upload-ornith.sh                   publish the Ornith artifact to Hugging Face
+hf-ornith/                         HF model card, LICENCE, NOTICE for that upload
+verify_frontend.py                 sha256 pin check for the grafted frontend
+frontend.sha256                    the six official Qwen3.8-27B frontend pins
+frontend-qwen3_6_35b_a3b.sha256    the six official Qwen3.6-35B-A3B frontend pins
+get-docker.sh                      vendored get.docker.com installer
 ```
 
 ## Credits
 
-- [NInfer](https://github.com/Neroued/ninfer) — the 5090 engine, converter, and groupwise-int recipes.
-- [Qwen](https://huggingface.co/Qwen) — the Qwen3.8-27B and Qwen3.6-35B-A3B base models and frontend resources.
-- [`JonathanColetti/Qwen3.8-27B-Uncensored`](https://huggingface.co/JonathanColetti/Qwen3.8-27B-Uncensored) — the abliterated base weights.
-- [`shisa-ai/Ornith-1.5-35B-A3B-MTP`](https://huggingface.co/shisa-ai/Ornith-1.5-35B-A3B-MTP) — Ornith with the distilled MTP head, merged into the Qwen3.6-35B-A3B checkpoint layout.
-- [`z-lab/Qwen3.6-35B-A3B-DFlash`](https://huggingface.co/z-lab/Qwen3.6-35B-A3B-DFlash) — the DFlash draft model.
+- [NInfer](https://github.com/Neroued/ninfer) for the 5090 engine, converter,
+  and groupwise-int recipes.
+- [Qwen](https://huggingface.co/Qwen) for the Qwen3.8-27B, Qwen3.6-35B-A3B and
+  Qwen3.8-Flash-Next base models and frontend resources.
+- [`JonathanColetti/Qwen3.8-27B-Uncensored`](https://huggingface.co/JonathanColetti/Qwen3.8-27B-Uncensored)
+  for the abliterated base weights.
+- [`shisa-ai/Ornith-1.5-35B-A3B-MTP`](https://huggingface.co/shisa-ai/Ornith-1.5-35B-A3B-MTP)
+  for Ornith with the distilled MTP head, merged into the Qwen3.6-35B-A3B
+  checkpoint layout.
+- [`z-lab/Qwen3.6-35B-A3B-DFlash`](https://huggingface.co/z-lab/Qwen3.6-35B-A3B-DFlash)
+  for the DFlash draft model.
+- [SGLang](https://github.com/sgl-project/sglang),
+  [gabrielolympie](https://github.com/gabrielolympie/sglang-flashnext-sm120)
+  and [jpezzulli](https://github.com/jpezzulli/sglang-rtxpro6000) for the
+  Flash-Next engine and the sm_120 patch stack.

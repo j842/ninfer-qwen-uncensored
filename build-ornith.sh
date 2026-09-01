@@ -10,7 +10,8 @@
 # NInfer's converter to emit a single-file .ninfer artifact for an RTX 5090.
 #
 # Everything runs in pinned Docker containers, so the only host requirement is
-# Docker with the NVIDIA container runtime. See README.md for the walk-through.
+# Docker with the NVIDIA container runtime. See models/ornith-1.5-35b-a3b.md
+# for the walk-through.
 #
 set -euo pipefail
 

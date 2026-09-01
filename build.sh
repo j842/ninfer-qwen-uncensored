@@ -8,7 +8,8 @@
 # ninfer-serve loads on an RTX 5090.
 #
 # Everything runs in pinned Docker containers, so the only host requirement is
-# Docker with the NVIDIA container runtime. See README.md for the full walk-through.
+# Docker with the NVIDIA container runtime. See models/qwen3.8-27b-uncensored.md
+# for the full walk-through.
 #
 set -euo pipefail
 
