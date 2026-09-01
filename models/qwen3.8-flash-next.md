@@ -113,8 +113,9 @@ them, because it touches a different file.
 
 Every patch is pure Python under `python/sglang/**`, and the one new kernel is
 Triton, which JITs at runtime. So there is no source build, no CUDA toolchain,
-and no 47 GB image push to a private registry. A small script edits the
-installed tree in place at container start, then the entrypoint execs SGLang.
+and no 47 GB image push to a private registry.
+[`flash-next/sm120-patch.py`](../flash-next/sm120-patch.py) edits the installed
+tree in place at container start, then the entrypoint execs SGLang.
 
 Three details that cost real time to find:
 
@@ -131,13 +132,14 @@ Three details that cost real time to find:
   entrypoint that is not a failure, it is a hang.
 
 Because fuzzy application can in principle land a hunk in the wrong place, it
-is never trusted on its own. The patch script ends every run by asserting ten
+is never trusted on its own. `sm120-patch.py` ends every run by asserting ten
 postconditions, the specific symbols each patch should have produced, and
-refuses to start the server if any is unmet. Run that verification in a **fresh
-interpreter**: if the script imported the modules earlier (to test
-idempotency), every `hasattr` is answered from a stale `sys.modules` entry
-while every source check reads the new bytes off disk, and that split brain
-reports a correctly-patched tree as broken.
+refuses to start the server if any is unmet. That verification runs in a
+**fresh interpreter**: the script imports the modules earlier to test
+idempotency, so afterwards every `hasattr` would be answered from a stale
+`sys.modules` entry while every source check read the new bytes off disk, and
+that split brain reports a correctly-patched tree as broken. Clearing
+`__pycache__` does not help; only a new process does.
 
 The container runs with `--restart unless-stopped`, so a restart re-runs the
 script against the same, already-patched writable layer. If all ten
@@ -165,19 +167,27 @@ is the only way to tell a healthy worker from a poisoned one.
 
 ## Launching it
 
-Four things have to exist on the host before this command works:
+Two things first: download the checkpoint from Hugging Face into a directory
+you will mount at `/models`, and fetch the patch stack.
 
-- the checkpoint, downloaded from Hugging Face into a directory you mount at
-  `/models`;
-- `patches/`, holding the six `.patch` files from
-  [gabrielolympie/sglang-flashnext-sm120](https://github.com/gabrielolympie/sglang-flashnext-sm120);
-- `sm120-patch.py`, the script that applies those six plus PR #36556 and then
-  asserts the ten postconditions described above. It is about 400 lines and
-  specific to our deployment, so it is not vendored here; the section above is
-  the full specification if you write your own;
-- `hot_tokens_64k.pt`, the 64K FR-Spec token map. Drop
-  `--speculative-token-map` if you do not have one, at the cost of about 9% of
-  decode throughput.
+```bash
+./flash-next/fetch-patches.sh    # → flash-next/patches/, sha256-verified
+```
+
+That pulls the six `.patch` files and `hot_tokens_64k.pt` (the 64K FR-Spec
+draft-vocabulary map) from
+[gabrielolympie/sglang-flashnext-sm120](https://github.com/gabrielolympie/sglang-flashnext-sm120)
+at commit `67d2f92`, and checks every one against
+[`flash-next/patches.sha256`](../flash-next/patches.sha256). They are fetched
+rather than committed here because that repository carries no licence, so there
+is no grant to redistribute its files. If upstream moves under the pin, the
+fetch fails loudly instead of quietly changing what you serve.
+
+[`flash-next/sm120-patch.py`](../flash-next/sm120-patch.py) is the patcher
+described above: it applies those six plus PR #36556, then asserts the ten
+postconditions in a fresh interpreter and refuses the start if any is unmet.
+
+Then, from the repo root:
 
 ```bash
 docker run -d --name qwen38-flash-next \
@@ -187,9 +197,9 @@ docker run -d --name qwen38-flash-next \
     --ulimit memlock=-1 --ulimit stack=67108864 \
     --cap-add SYS_PTRACE \
     -v /path/to/Qwen3.8-Flash-Next-NVFP4:/models:ro \
-    -v "$PWD/patches:/patches:ro" \
-    -v "$PWD/patches/hot_tokens_64k.pt:/hot_tokens_64k.pt:ro" \
-    -v "$PWD/sm120-patch.py:/sm120-patch.py:ro" \
+    -v "$PWD/flash-next/patches:/patches:ro" \
+    -v "$PWD/flash-next/patches/hot_tokens_64k.pt:/hot_tokens_64k.pt:ro" \
+    -v "$PWD/flash-next/sm120-patch.py:/sm120-patch.py:ro" \
     -v qwen38fn_jit_cache:/root/.cache \
     -e PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True \
     -e SGLANG_ALLOW_OVERWRITE_LONGER_CONTEXT_LEN=1 \

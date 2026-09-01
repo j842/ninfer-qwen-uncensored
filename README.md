@@ -12,7 +12,7 @@ setup took a while to get right.
 |---|---|---|---|
 | [Qwen3.8-27B Uncensored](models/qwen3.8-27b-uncensored.md) | NInfer, RTX 5090 | dense 27B, not benchmarked here | build it: `./build.sh` |
 | [Ornith-1.5-35B-A3B](models/ornith-1.5-35b-a3b.md) | NInfer, RTX 5090 | ~593 tok/s single stream | [download](https://huggingface.co/huggingJDE/Ornith-1.5-35B-A3B-NInfer) or `./build-ornith.sh` |
-| [Qwen3.8-Flash-Next](models/qwen3.8-flash-next.md) | SGLang, RTX PRO 6000 | 236-324 tok/s single stream | pull the stock image, patch it at start |
+| [Qwen3.8-Flash-Next](models/qwen3.8-flash-next.md) | SGLang, RTX PRO 6000 | 236-324 tok/s single stream | `./flash-next/fetch-patches.sh`, then the stock image |
 
 ## [Qwen3.8-27B Uncensored](models/qwen3.8-27b-uncensored.md)
 
@@ -96,8 +96,16 @@ hf-ornith/                         HF model card, LICENCE, NOTICE for that uploa
 verify_frontend.py                 sha256 pin check for the grafted frontend
 frontend.sha256                    the six official Qwen3.8-27B frontend pins
 frontend-qwen3_6_35b_a3b.sha256    the six official Qwen3.6-35B-A3B frontend pins
+flash-next/
+  fetch-patches.sh                 fetch + verify the sm_120 patch stack
+  patches.sha256                   its seven sha256 pins, at a pinned commit
+  sm120-patch.py                   apply the stack inside the SGLang container
 get-docker.sh                      vendored get.docker.com installer
 ```
+
+`flash-next/patches/` is fetched, not committed: the upstream patch repository
+carries no licence, so this repo pins the files by sha256 instead of
+redistributing them.
 
 ## Credits
 

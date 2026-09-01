@@ -1,0 +1,27 @@
+# The sm_120 patch stack for SGLang, sha256-pinned.
+#
+# Source: github.com/gabrielolympie/sglang-flashnext-sm120 at commit
+#         67d2f9234fa45ae1339f0d53cd37cb695e9c6493 (2026-08-31), which in turn
+#         ports the sm_120 RecoverSSM/WY and fp8-QSA groundwork from
+#         github.com/jpezzulli/sglang-rtxpro6000.
+#
+# fetch-patches.sh downloads these seven files into ./patches/ and verifies
+# them against this list. They are fetched rather than vendored because the
+# upstream repository carries no licence, so there is no redistribution grant.
+#
+# The six .patch files are diffs against sgl-project/sglang as of
+# 2026-08-30/31; hot_tokens_64k.pt is the 64K FR-Spec draft-vocabulary map.
+# These hashes were verified byte-for-byte against the deployment described in
+# models/qwen3.8-flash-next.md.
+#
+# If you re-pin to a newer upstream commit, refresh every line here and re-read
+# the patch-application notes on that page: which patches apply strictly and
+# which need fuzz depends on the SGLang image you pin alongside them.
+
+d1c8f7ea4450600da4963d128159f768b7b2bad89ff13cbc947a97bca202d2ff  0001b-recoverssm-wy-sm120-PORTED.patch
+a85100107a0778acfa0457a0234c9aae730ab9ca2aace8bafc6074f81588237a  0002-fp8-qsa-tile-dequant.patch
+71c61bde4d6c408bb941a8b9af2728c74c7f39697eefb76b1e19d72992f2b3f7  0003-sm120-fp32-prefill-state.patch
+fb41905a2ca47dc357226cfecbe350116b42dffd25a14dafb67be0d84e64202f  0004-sm120-lowm-triton-gemm.patch
+43de44f1266549118c1136b6c1fefc1e3b42d1da87347987ae08a29d621ca25b  0005-sm120-fp8-weight-only.patch
+0cafb084741e828f5571acbf053365724004c6b4433f18a9f9e62a1c13209f0e  0006-sm120-fp8-hc-lmhead.patch
+f03551e4709e50e5842b24912845c243bfe628b74bf185617fae7ebaaa0da86c  hot_tokens_64k.pt

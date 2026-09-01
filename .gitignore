@@ -221,3 +221,7 @@ __marimo__/
 work/
 work-ornith/
 *.ninfer
+
+# Third-party patch stack, fetched and sha256-verified by
+# flash-next/fetch-patches.sh. Not committed: upstream carries no licence.
+flash-next/patches/
