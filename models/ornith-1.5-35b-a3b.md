@@ -82,8 +82,18 @@ ninfer-serve ornith_1_5_35b_a3b.ninfer \
     --vision
 ```
 
-For text-only serving, try `--spec dflash --draft-tokens 7` instead. MTP and
-DFlash are mutually exclusive, and DFlash cannot combine with `--vision`.
+For text-only serving, `--spec dflash --draft-tokens 7` is the faster option on
+paper (MTP and DFlash are mutually exclusive, and DFlash cannot combine with
+`--vision`) — but a known engine bug makes it unreliable for now: long
+generations can abort with `KV materialization exceeds active entitlement`.
+NInfer reserves each request's draft-model KV pages padded by the draft window
+under MTP but not under DFlash (`request_plan_impl.h`, `plan_request`), so a
+DFlash round near the end of a request's output budget can step past its
+reservation when it crosses a 64-token KV page boundary. Bigger
+`--draft-tokens` makes it more likely; `--kv-capacity` and `--kv-dtype` are
+unrelated and won't help. Until it is fixed upstream, serve with MTP
+(`--spec mtp --draft-tokens 3` as above), which is also the head that was
+distilled for Ornith specifically.
 
 For reference, the official `qwen3_6_35b_a3b` artifact measures ~593 tok/s
 single-stream decode with MTP=3 on a 5090, and ~1,314 aggregate tok/s at

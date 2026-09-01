@@ -60,10 +60,18 @@ ninfer-serve ornith_1_5_35b_a3b.ninfer \
     --vision
 ```
 
-For text-only serving, try `--spec dflash --draft-tokens 7` instead (MTP and
-DFlash are mutually exclusive; DFlash cannot combine with `--vision`).
 `--kv-dtype int8` is what lets full context and the vision tower coexist in
 32 GB. NInfer exposes an OpenAI-compatible `/v1/chat/completions`.
+
+**Avoid DFlash for now.** Text-only serving with `--spec dflash` would be the
+faster configuration (MTP and DFlash are mutually exclusive; DFlash cannot
+combine with `--vision`), but a known NInfer bug can abort long DFlash
+generations with `KV materialization exceeds active entitlement`: the engine
+pads each request's draft-model KV reservation by the draft window under MTP
+but not under DFlash, so a round near the end of a request's output budget can
+step past its reservation at a KV page boundary. Bigger `--draft-tokens`
+makes it more likely, and `--kv-capacity`/`--kv-dtype` settings are unrelated.
+Serve with MTP until it is fixed upstream.
 
 **Speculation caveats:** the MTP head was distilled for Ornith specifically, so
 acceptance should be near the official Qwen3.6-35B-A3B model's (~80%, ~3.4
