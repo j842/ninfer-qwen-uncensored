@@ -4,10 +4,12 @@ Build recipes and serving notes for the local models we run, one page per model.
 
 Two of them are reproducible [NInfer](https://github.com/Neroued/ninfer) builds
 for the RTX 5090: one command each, from pinned public inputs, to a single
-`.ninfer` file. The other two are Qwen3.8-Flash-Next, which has nothing to do
-with NInfer and is here because it is the fastest thing we serve and both
-setups took a while to get right: SGLang on an RTX PRO 6000, and llama.cpp on
-a 5090 with the experts in system RAM.
+`.ninfer` file. Two are Qwen3.8-Flash-Next, which has nothing to do with NInfer
+and is here because it is the fastest thing we serve and both setups took a
+while to get right: SGLang on an RTX PRO 6000, and llama.cpp on a 5090 with the
+experts in system RAM. The last is the other end of the range, a 7.9B MoE on an
+8 GB Intel Arc A750, where the work was in configuring around two Vulkan
+crashes.
 
 | Model | Engine / card | Speed | How to get it |
 |---|---|---|---|
@@ -15,6 +17,7 @@ a 5090 with the experts in system RAM.
 | [Ornith-1.5-35B-A3B](models/ornith-1.5-35b-a3b.md) | NInfer, RTX 5090 | ~593 tok/s single stream | [download](https://huggingface.co/huggingJDE/Ornith-1.5-35B-A3B-NInfer) or `./build-ornith.sh` |
 | [Qwen3.8-Flash-Next](models/qwen3.8-flash-next.md) | SGLang, RTX PRO 6000 | 236-324 tok/s single stream | `./flash-next/fetch-patches.sh`, then the stock image |
 | [Qwen3.8-Flash-Next on a 5090](models/qwen3.8-flash-next-5090.md) | llama.cpp, RTX 5090 | 38-43 tok/s single stream | `./flash-next-5090/build-engine.sh`, then a public GGUF |
+| [Ling-3.0-tiny](models/ling-3.0-tiny-a750.md) | llama.cpp Vulkan, Arc A750 8 GB | 40.5 tok/s single stream | the stock image, then a public GGUF |
 
 ## [Qwen3.8-27B Uncensored](models/qwen3.8-27b-uncensored.md)
 
@@ -58,6 +61,20 @@ budget per expert split, why the smaller quant is the wrong trade, the six
 upstream PRs in the patch and what each fixed, why the model's own MTP head
 must stay switched off, and how a silent logit-drift bug showed up as a
 quality score rather than a crash.
+
+## [Ling-3.0-tiny](models/ling-3.0-tiny-a750.md)
+
+The cheap end: inclusionAI's Ling-3.0-tiny (7.9B total, 1.3B active, 128
+routed experts, a 3:1 stack of KDA and MLA attention) on an 8 GB Intel Arc
+A750, llama.cpp Vulkan. Stock `ghcr.io/ggml-org/llama.cpp:server-vulkan` and
+one public GGUF, with nothing to build since `bailingmoe3` went upstream.
+40.5 tok/s decode, 1217 tok/s prefill, a 73,728-token window in 6.79 GiB of 8,
+and a quality score that puts the 8 GB card above a 24 GB one running a model
+three times the size. The page is mostly the two Vulkan-on-Arc landmines that
+present as broken hardware: flash attention hangs the GPU on prompts over about
+550 tokens, and the server prompt cache loses the device on the first slot-state
+save. Plus why a hybrid reasoning model needs a thinking budget rather than a
+thinking switch.
 
 ## Building the NInfer artifacts
 
@@ -103,6 +120,7 @@ models/
   ornith-1.5-35b-a3b.md            NInfer build 2: the 35B MoE, published on HF
   qwen3.8-flash-next.md            SGLang on an RTX PRO 6000 (not NInfer)
   qwen3.8-flash-next-5090.md       llama.cpp on an RTX 5090 (not NInfer)
+  ling-3.0-tiny-a750.md            llama.cpp Vulkan on an Intel Arc A750 (not NInfer)
 build.sh                           Qwen3.8-27B uncensored build (four steps)
 build-ornith.sh                    Ornith-1.5-35B-A3B MoE build (five steps)
 upload-ornith.sh                   publish the Ornith artifact to Hugging Face
@@ -148,3 +166,9 @@ llama.cpp and its pull requests are MIT.
   #27742, #27836, #27861, #27879, #27941, #27977 and #28023 for the `qwen4exp`
   architecture and the fixes vendored in `maxspeed.patch`, and
   [unsloth](https://huggingface.co/unsloth) for the UD-Q4_K_XL GGUF.
+- [`inclusionAI/Ling-3.0-tiny`](https://huggingface.co/inclusionAI/Ling-3.0-tiny)
+  for the small hybrid-linear MoE, llama.cpp PR
+  [#26608](https://github.com/ggml-org/llama.cpp/pull/26608) for `bailingmoe3`
+  support, and
+  [`bloomer010/Ling-3.0-tiny-GGUF`](https://huggingface.co/bloomer010/Ling-3.0-tiny-GGUF)
+  for the quant that carries the SwiGLU-clamp metadata fix.
