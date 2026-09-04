@@ -4,15 +4,17 @@ Build recipes and serving notes for the local models we run, one page per model.
 
 Two of them are reproducible [NInfer](https://github.com/Neroued/ninfer) builds
 for the RTX 5090: one command each, from pinned public inputs, to a single
-`.ninfer` file. The third is Qwen3.8-Flash-Next on SGLang, which has nothing to
-do with NInfer and is here because it is the fastest thing we serve and the
-setup took a while to get right.
+`.ninfer` file. The other two are Qwen3.8-Flash-Next, which has nothing to do
+with NInfer and is here because it is the fastest thing we serve and both
+setups took a while to get right: SGLang on an RTX PRO 6000, and llama.cpp on
+a 5090 with the experts in system RAM.
 
 | Model | Engine / card | Speed | How to get it |
 |---|---|---|---|
 | [Qwen3.8-27B Uncensored](models/qwen3.8-27b-uncensored.md) | NInfer, RTX 5090 | dense 27B, not benchmarked here | build it: `./build.sh` |
 | [Ornith-1.5-35B-A3B](models/ornith-1.5-35b-a3b.md) | NInfer, RTX 5090 | ~593 tok/s single stream | [download](https://huggingface.co/huggingJDE/Ornith-1.5-35B-A3B-NInfer) or `./build-ornith.sh` |
 | [Qwen3.8-Flash-Next](models/qwen3.8-flash-next.md) | SGLang, RTX PRO 6000 | 236-324 tok/s single stream | `./flash-next/fetch-patches.sh`, then the stock image |
+| [Qwen3.8-Flash-Next on a 5090](models/qwen3.8-flash-next-5090.md) | llama.cpp, RTX 5090 | 38-43 tok/s single stream | `./flash-next-5090/build-engine.sh`, then a public GGUF |
 
 ## [Qwen3.8-27B Uncensored](models/qwen3.8-27b-uncensored.md)
 
@@ -42,9 +44,20 @@ by SGLang on one RTX PRO 6000 Blackwell, with a seven-piece patch stack applied
 to the stock image at container start. 257 tok/s prose and 324 tok/s code at
 shallow depth, still 236 / 288 at 250K tokens of context. The page covers the
 patch stack, the full launch command, the measured VRAM budget, and the silent
-output corruption that a health check will not catch. It also has the RTX 5090
-fallback: llama.cpp with all 512 experts streaming from system RAM, about 43
-tok/s.
+output corruption that a health check will not catch.
+
+## [Qwen3.8-Flash-Next on a 5090](models/qwen3.8-flash-next-5090.md)
+
+The same model on a 32 GB RTX 5090, which no GPU-resident engine can do: a
+pinned mainline llama.cpp plus one vendored patch, with every routed expert
+streaming from system RAM and the tail five layers on the card. 42-43 tok/s
+on short prompts and 38 at 24K tokens of context, the full 262K window,
+vision included, off a public unsloth GGUF. Needs about 100 GB of free host
+RAM and as many physical cores as you can spare. The page covers the VRAM
+budget per expert split, why the smaller quant is the wrong trade, the six
+upstream PRs in the patch and what each fixed, why the model's own MTP head
+must stay switched off, and how a silent logit-drift bug showed up as a
+quality score rather than a crash.
 
 ## Building the NInfer artifacts
 
@@ -89,6 +102,7 @@ models/
   qwen3.8-27b-uncensored.md        NInfer build 1: the abliterated dense 27B
   ornith-1.5-35b-a3b.md            NInfer build 2: the 35B MoE, published on HF
   qwen3.8-flash-next.md            SGLang on an RTX PRO 6000 (not NInfer)
+  qwen3.8-flash-next-5090.md       llama.cpp on an RTX 5090 (not NInfer)
 build.sh                           Qwen3.8-27B uncensored build (four steps)
 build-ornith.sh                    Ornith-1.5-35B-A3B MoE build (five steps)
 upload-ornith.sh                   publish the Ornith artifact to Hugging Face
@@ -100,12 +114,18 @@ flash-next/
   fetch-patches.sh                 fetch + verify the sm_120 patch stack
   patches.sha256                   its seven sha256 pins, at a pinned commit
   sm120-patch.py                   apply the stack inside the SGLang container
+flash-next-5090/
+  build-engine.sh                  build the pinned llama.cpp + patch into an image
+  maxspeed.patch                   the six upstream llama.cpp PRs, merged onto b10705
+  Dockerfile.runtime               the small CUDA runtime image it bakes
+  probe-long.sh                    deep-prefill coherence probe
 get-docker.sh                      vendored get.docker.com installer
 ```
 
 `flash-next/patches/` is fetched, not committed: the upstream patch repository
 carries no licence, so this repo pins the files by sha256 instead of
-redistributing them.
+redistributing them. `flash-next-5090/maxspeed.patch` is committed, because
+llama.cpp and its pull requests are MIT.
 
 ## Credits
 
@@ -124,3 +144,7 @@ redistributing them.
   [gabrielolympie](https://github.com/gabrielolympie/sglang-flashnext-sm120)
   and [jpezzulli](https://github.com/jpezzulli/sglang-rtxpro6000) for the
   Flash-Next engine and the sm_120 patch stack.
+- [llama.cpp](https://github.com/ggml-org/llama.cpp) and the authors of PRs
+  #27742, #27836, #27861, #27879, #27941, #27977 and #28023 for the `qwen4exp`
+  architecture and the fixes vendored in `maxspeed.patch`, and
+  [unsloth](https://huggingface.co/unsloth) for the UD-Q4_K_XL GGUF.

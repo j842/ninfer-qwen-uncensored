@@ -401,53 +401,12 @@ Not `--mem-fraction-static`, for the reason above.
 ## The same model on an RTX 5090
 
 If a 96 GB card is not on the table, llama.cpp will serve Flash-Next on a
-32 GB 5090 with every routed expert streaming from system RAM. It is about a
-sixth of the speed and needs ~100 GB of free RAM, but it is the same weights
-and the same 262K window.
-
-At `--n-cpu-moe 48`, all experts on the CPU, which is the floor:
-
-```
-GPU   5.2 GiB  non-expert tensors (attn/GDN/QSA/routers, shared experts, embed)
-   +  0.9 GiB  vision ViT (mmproj)
-   +  6.0 GiB  KV at 262,144 (24 KiB/token, 12 of 48 layers)
-   +  6.0 GiB  compute buffers + CUDA context/graphs (ubatch 2048)
-   = 18.1 GiB  measured, of 31.8
-HOST 71.7 GiB  routed experts, all 48 layers (mmap page cache)
-   + 26.8 GiB  PLE n-gram table, IQ4_NL (host-side by design)
-```
-
-- Weights: unsloth **UD-Q4_K_XL** (103.7 GiB, 4 shards) from
-  [unsloth/Qwen3.8-Flash-Next-GGUF](https://huggingface.co/unsloth/Qwen3.8-Flash-Next-GGUF).
-  Not UD-IQ4_XS: it drops 94 of 144 expert tensors to IQ3_S, a 3.4-bit expert
-  build wearing a 4-bit name, and on a model with 6B active parameters per
-  token that is the wrong end of the trade. Decode here is not
-  bandwidth-saturated anyway (~51 GB/s of a ~205 GB/s bus). Our deployed file
-  is an imatrix requant of the same recipe with the MTP head grafted in as
-  blk.48; the stock file serves fine, since speculation is off either way.
-- Engine: llama.cpp PR
-  [#27742](https://github.com/ggml-org/llama.cpp/pull/27742) merged to master
-  on 2026-08-27, so the base is now mainline. We run b10705 plus four
-  correctness and depth cherry-picks: #27941 (QSA blocks keyed per sequence and
-  rank order, the fix for a silent logit-drift class of bug), #28011 (kv-cells
-  scan early exit, which dominated decode cost at depth), #28023 (indexer
-  head-sum by slices) and #27977 (QSA gather-window decode split).
-- `--n-cpu-moe 43` puts the first 43 layers' experts in RAM and keeps the tail
-  five on the card, which is 30.0 GiB of the 32 and worth about 4 tok/s over
-  the all-experts-on-CPU floor.
-- Measured: 42-43 tok/s on short natural prompts, 40.9 at 6K depth, 38.2 at
-  24K, prefill 936 / 873 / 848 tok/s at 2K / 8K / 32K. Decode is essentially
-  flat with depth, which is the GDN+QSA architecture doing what it promises.
-- **Speculation is off.** The model's own MTP head can be grafted into the GGUF
-  as blk.48 and #27836's `draft-mtp` will load it, but on every patch set tried
-  it corrupts output, progressively and mid-answer, while acceptance collapses
-  from 63-66% to 3-11%. Upstream #28019 explains why: the recurrent-state
-  rollback flag fails llama.cpp's own rollback test with a logits diff of 9.25,
-  because PLE conv and QSA indexer state lack snapshot coverage. n-gram
-  speculation measured about 0% on honest traffic here.
-- Bench until consecutive runs agree. The first deploy read 23.7 tok/s at 8K
-  and 16.1 at 32K on pass 2 and 84.1 / 82.0 on pass 3: what looked like a depth
-  cliff was page-cache warming.
+32 GB 5090 with the routed experts streaming from system RAM: the same
+weights and the same 262K window at about a sixth of the speed, 42-43 tok/s
+on short prompts and 38 at 24K. It needs ~100 GB of free host RAM, a pinned
+mainline llama.cpp plus one vendored patch, and a public unsloth GGUF. That
+setup has its own page: [Qwen3.8-Flash-Next on a
+5090](qwen3.8-flash-next-5090.md).
 
 ## Sources
 

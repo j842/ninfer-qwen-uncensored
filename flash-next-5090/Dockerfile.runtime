@@ -1,0 +1,21 @@
+# Runtime image for the llama-server binary compiled by build-engine.sh, which
+# builds it inside a CUDA devel container (so the ~15-min compile can be
+# CPU-pinned; docker buildkit has no --cpuset-cpus). Context is the llama.cpp
+# source tree with build/bin/ populated. The binary is statically linked
+# against llama/ggml (BUILD_SHARED_LIBS=OFF); only the CUDA runtime libraries
+# (present in the runtime base) and libgomp are dynamic.
+ARG RUNTIME_IMAGE=nvidia/cuda:13.1.2-runtime-ubuntu24.04
+FROM ${RUNTIME_IMAGE}
+
+ARG DEBIAN_FRONTEND=noninteractive
+RUN apt-get update \
+    && apt-get install --yes --no-install-recommends \
+        ca-certificates \
+        libgomp1 \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY build/bin/llama-server /usr/local/bin/llama-server
+
+WORKDIR /workspace
+STOPSIGNAL SIGTERM
+ENTRYPOINT ["/usr/local/bin/llama-server"]

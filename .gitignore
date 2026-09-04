@@ -220,6 +220,7 @@ __marimo__/
 # Build working dirs (build.sh / build-ornith.sh) and model artifacts
 work/
 work-ornith/
+work-flash-next-5090/
 *.ninfer
 
 # Third-party patch stack, fetched and sha256-verified by
