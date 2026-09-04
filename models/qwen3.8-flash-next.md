@@ -6,9 +6,10 @@ because getting it there needed a seven-piece patch stack that is not obvious
 from any single upstream page.
 
 **257 tok/s prose and 324 tok/s code at shallow depth, 236 / 288 at 250K tokens
-of context**, single stream, on one card, at the full 262,144-token native
-window. Measured 2026-08-31. Before the patch stack, the same card and the same
-checkpoint did 139.60 / 186.48 and could not exceed 196,608 tokens of context.
+of context, prefill 11,000-12,600 tok/s throughout**, single stream, on one
+card, at the full 262,144-token native window. Measured 2026-08-31. Before the
+patch stack, the same card and the same checkpoint did 139.60 / 186.48 and could
+not exceed 196,608 tokens of context.
 
 ## The model
 

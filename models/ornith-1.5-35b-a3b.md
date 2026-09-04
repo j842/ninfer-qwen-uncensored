@@ -97,7 +97,9 @@ distilled for Ornith specifically.
 
 For reference, the official `qwen3_6_35b_a3b` artifact measures ~593 tok/s
 single-stream decode with MTP=3 on a 5090, and ~1,314 aggregate tok/s at
-concurrency 8.
+concurrency 8. With speculation off that single-stream figure is ~271 tok/s, so
+the MTP head is worth better than 2x. Prefill on our own deployment runs at
+~13,700 tok/s into the 262,144-token window.
 
 ## Publishing to Hugging Face
 

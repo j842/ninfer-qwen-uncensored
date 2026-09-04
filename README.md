@@ -11,13 +11,16 @@ experts in system RAM. The last is the other end of the range, a 7.9B MoE on an
 8 GB Intel Arc A750, where the work was in configuring around two Vulkan
 crashes.
 
-| Model | Engine / card | Speed | How to get it |
-|---|---|---|---|
-| [Qwen3.8-27B Uncensored](models/qwen3.8-27b-uncensored.md) | NInfer, RTX 5090 | dense 27B, not benchmarked here | build it: `./build.sh` |
-| [Ornith-1.5-35B-A3B](models/ornith-1.5-35b-a3b.md) | NInfer, RTX 5090 | ~593 tok/s single stream | [download](https://huggingface.co/huggingJDE/Ornith-1.5-35B-A3B-NInfer) or `./build-ornith.sh` |
-| [Qwen3.8-Flash-Next](models/qwen3.8-flash-next.md) | SGLang, RTX PRO 6000 | 236-324 tok/s single stream | `./flash-next/fetch-patches.sh`, then the stock image |
-| [Qwen3.8-Flash-Next on a 5090](models/qwen3.8-flash-next-5090.md) | llama.cpp, RTX 5090 | 38-43 tok/s single stream | `./flash-next-5090/build-engine.sh`, then a public GGUF |
-| [Ling-3.0-tiny](models/ling-3.0-tiny-a750.md) | llama.cpp Vulkan, Arc A750 8 GB | 40.5 tok/s single stream | the stock image, then a public GGUF |
+| Model | Engine / card | Decode, 1 stream | Prefill | How to get it |
+|---|---|---|---|---|
+| [Qwen3.8-27B Uncensored](models/qwen3.8-27b-uncensored.md) | NInfer, RTX 5090 | dense 27B, not benchmarked here | not benchmarked here | build it: `./build.sh` |
+| [Ornith-1.5-35B-A3B](models/ornith-1.5-35b-a3b.md) | NInfer, RTX 5090 | ~593 tok/s | ~13,700 tok/s | [download](https://huggingface.co/huggingJDE/Ornith-1.5-35B-A3B-NInfer) or `./build-ornith.sh` |
+| [Qwen3.8-Flash-Next](models/qwen3.8-flash-next.md) | SGLang, RTX PRO 6000 | 236-324 tok/s | 11,000-12,600 tok/s | `./flash-next/fetch-patches.sh`, then the stock image |
+| [Qwen3.8-Flash-Next on a 5090](models/qwen3.8-flash-next-5090.md) | llama.cpp, RTX 5090 | 38-43 tok/s | 850-940 tok/s | `./flash-next-5090/build-engine.sh`, then a public GGUF |
+| [Ling-3.0-tiny](models/ling-3.0-tiny-a750.md) | llama.cpp Vulkan, Arc A750 8 GB | 40.5 tok/s | ~1,200 tok/s | the stock image, then a public GGUF |
+
+Prefill is the column that separates the two Flash-Next builds: the same weights
+run 13x slower at prompt processing once the experts live in system RAM.
 
 ## [Qwen3.8-27B Uncensored](models/qwen3.8-27b-uncensored.md)
 
@@ -37,7 +40,8 @@ is in this repo because the checkpoint is an exact drop-in for NInfer's
 registered `qwen3_6_35b_a3b` target, so the same build pattern applies with one
 extra download step. Every input is Apache-2.0 or MIT, so the built artifact is
 published: **[huggingJDE/Ornith-1.5-35B-A3B-NInfer](https://huggingface.co/huggingJDE/Ornith-1.5-35B-A3B-NInfer)**.
-By a distance the faster of the two 5090 builds.
+By a distance the faster of the two 5090 builds: ~593 tok/s of decode with MTP
+speculation on, prefilling at ~13,700 tok/s.
 
 ## [Qwen3.8-Flash-Next](models/qwen3.8-flash-next.md)
 
@@ -45,7 +49,8 @@ Not NInfer, not a 5090, and there is no artifact to download. The Qwen4
 architecture preview (180B total, 6B active, 512 experts, 262K context) served
 by SGLang on one RTX PRO 6000 Blackwell, with a seven-piece patch stack applied
 to the stock image at container start. 257 tok/s prose and 324 tok/s code at
-shallow depth, still 236 / 288 at 250K tokens of context. The page covers the
+shallow depth, still 236 / 288 at 250K tokens of context, and prefill of
+11,000-12,600 tok/s that barely moves across that whole range. The page covers the
 patch stack, the full launch command, the measured VRAM budget, and the silent
 output corruption that a health check will not catch.
 
@@ -54,8 +59,8 @@ output corruption that a health check will not catch.
 The same model on a 32 GB RTX 5090, which no GPU-resident engine can do: a
 pinned mainline llama.cpp plus one vendored patch, with every routed expert
 streaming from system RAM and the tail five layers on the card. 42-43 tok/s
-on short prompts and 38 at 24K tokens of context, the full 262K window,
-vision included, off a public unsloth GGUF. Needs about 100 GB of free host
+on short prompts and 38 at 24K tokens of context, prefill 850-940 tok/s, the
+full 262K window, vision included, off a public unsloth GGUF. Needs about 100 GB of free host
 RAM and as many physical cores as you can spare. The page covers the VRAM
 budget per expert split, why the smaller quant is the wrong trade, the six
 upstream PRs in the patch and what each fixed, why the model's own MTP head
