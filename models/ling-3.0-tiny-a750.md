@@ -3,107 +3,33 @@
 inclusionAI's Ling-3.0-tiny (7.9B total, 1.3B active) on an 8 GB Intel Arc
 A750, stock llama.cpp Vulkan, one public GGUF. Nothing to build.
 
-**40.5 tok/s decode, 812-1096 tok/s prefill up to 18K tokens, 73,728-token
-window across 2 slots in 6.79 GiB**, measured 2026-08-20.
-
 | | |
 |---|---|
-| **Engine** | `ghcr.io/ggml-org/llama.cpp:server-vulkan`, build 10460 or newer (`bailingmoe3` merged 2026-08-17, [#26608](https://github.com/ggml-org/llama.cpp/pull/26608)) |
+| **Engine** | `ghcr.io/ggml-org/llama.cpp:server-vulkan-b10795`, digest `sha256:f862c901a0089bc3dc326bd24f208bfcd147839783328d252e911a004c94ff3c` (2026-09-04) |
 | **Weights** | [`bloomer010/Ling-3.0-tiny-GGUF`](https://huggingface.co/bloomer010/Ling-3.0-tiny-GGUF), `Ling-3.0-tiny-UD-Q4_K_XL.gguf`, 5.34 GB |
-| **Model** | [`inclusionAI/Ling-3.0-tiny`](https://huggingface.co/inclusionAI/Ling-3.0-tiny), MIT. 128 routed experts + 1 shared, 8 per token, 24 layers in a 3:1 KDA/MLA stack, 131,072 native context, no MTP block |
+| **Model** | [`inclusionAI/Ling-3.0-tiny`](https://huggingface.co/inclusionAI/Ling-3.0-tiny), MIT. 128 routed experts + 1 shared, 8 per token, 24 layers in a 3:1 KDA/MLA stack, 131,072 native context |
 | **Card** | Arc A750 8 GB (Alchemist), 6.79 GiB used at `--ctx-size 73728` |
-| **Host** | Docker, DRM render node, Mesa Vulkan. No SYCL |
+| **Context** | 73,728 across 2 slots, 36,864 each, f16 KV |
+| **Decode** | 40.5 tok/s single stream |
+| **Prefill** | 812–1,217 tok/s on prompts to 18K |
 
-Why this model: on a bandwidth-bound card, bytes per token matter. 1.3B
-active reads a sixth of a dense 8B. Quality on an in-house 0-100 scale, all
-on this card:
-
-| | quant | quality | decode | context/slot |
-|---|---|---|---|---|
-| Granite 4.1 8B | Q4_K_M | 52 | 35.5 | 16K |
-| Ling-3.0-tiny | Q4_K_M | 61 | 56 | 49K possible |
-| Ling-3.0-tiny | UD-Q4_K_XL | 69 | 40.5 | 36K, shipped |
-
-Q4_K_M at `--ctx-size 98304` is the throughput option.
-
-## Quant
-
-- K-quant, not I-quant: I-quant dequant is slow on Arc.
-- UD-Q4_K_XL keeps attention, embeddings, first and last layers at higher
-  bits. KDA projections are precision-sensitive. Q6_K (6.50 GB) leaves no
-  compute buffer on 8 GB.
-- Use bloomer010's repo: it carries the 2026-08-07 SwiGLU-clamp metadata fix
-  and was re-uploaded after the llama.cpp merge. GGUFs without the clamp
-  values are silently wrong.
-
-## Engine
-
-Check the image is at or past the merge before blaming config:
-
-```bash
-docker run --rm --entrypoint /app/llama-server \
-    ghcr.io/ggml-org/llama.cpp:server-vulkan --version
-# version: 0.1.2-dev (build 10499, commit 6d0549831)   need build >= 10460
-```
-
-Two version-line formats exist (semver from v0.1.2, 2026-08-18); a parser
-for the old shape reads `0` from `0.1.2-dev`.
-
-## Required settings
-
-- `--flash-attn off`. With FA on, one KDA/MLA Vulkan shader hangs the GPU on
-  prompts above ~550 tokens (`i915: GPU HANG ecode 12:1:85def5fb`, then
-  `ErrorDeviceLost`). Nondeterministic; 3161 tokens never survives. Not a
-  VRAM issue. Smaller batch sizes and f16 KV do not help. SYCL is stable at
-  17.7 tok/s. FA off costs ~5% decode. The flag is `on|off|auto`, default
-  `auto`; pass `off` explicitly.
-- `--cache-type-k f16 --cache-type-v f16`. Quantised V needs flash
-  attention; quantised K alone fails to load.
-- `--cache-ram 0`. Slot-state save to the prompt cache
-  (`server_slot::prompt_save` -> `vk::Queue::submit`) loses the device;
-  KDA recurrent state cannot be serialised on Vulkan. Default is 8192 MiB
-  (on). Cost: no prefix reuse across requests.
-- `--parallel 2`, explicit. Default -1 auto-picked four slots on this card.
-- `--reasoning auto --reasoning-budget 1024`. `--reasoning off` only sets a
-  default that callers override with `enable_thinking`; `--reasoning-budget
-  0` pins it off but the model then reasons in the answer channel and runs
-  past 13K tokens. 1024 thinking tokens is ~18 s. -1 for a full reasoning
-  worker.
-- `--n-predict 8192` is the default when a caller sends no `max_tokens`, not
-  a ceiling; an explicit larger `max_tokens` is not clamped. The reasoning
-  budget is the runaway defence.
-
-## Context
-
-f16 KV costs 24.03 KiB/token; only 6 MLA layers keep a per-token cache
-(latent 512 + rope 64), the 18 KDA layers hold constant-size state. Base
-4.62 GiB (Q4_K_M weights + compute) + 0.48 GiB for UD-Q4_K_XL.
-
-| `--ctx-size` | VRAM | free of 8 GiB |
-|---|---|---|
-| 65536 | 6.61 GiB | 1.39 |
-| **73728** | **6.79 GiB** | **1.21, shipped** |
-| 81920 | 6.98 GiB | 1.02 |
-| 98304 | 7.36 GiB | 0.64, too tight |
-| 131072 | 7.62 GiB (Q4_K_M) | `failed to fit params` |
-
-`--ctx-size` is the total across slots: 73728 / 2 = 36,864 per slot. Read the
-real figures from the log (`KV self size`, `Vulkan0 compute buffer size`) and
-`drm-total-local0` in the process fdinfo.
+The quant: a K-quant, since I-quant dequantisation is slow on Arc, from the
+repo that carries the 2026-08-07 SwiGLU-clamp metadata fix and was
+re-uploaded after `bailingmoe3` merged (llama.cpp #26608, 2026-08-17). GGUFs
+without the clamp values are silently wrong. UD-Q4_K_XL scored 69 on our
+0–100 grader against Q4_K_M's 61, for 15 tok/s of decode; Q4_K_M at
+`--ctx-size 98304` is the throughput option, and Q6_K (6.50 GB) leaves no
+room for the compute buffer. No MTP block, so no self-speculation.
 
 ## Launch
 
-The A750 is PCI ID `8086:56a1`; with an Intel iGPU present, the first Intel
-render node is the iGPU.
+The A750 is PCI `8086:56a1`; on a host with an Intel iGPU the first render
+node is the wrong card:
 
 ```bash
 lspci -D -d 8086:56a1                      # 0000:03:00.0
 ls /sys/bus/pci/devices/0000:03:00.0/drm/  # card1  renderD129
-```
-
-```bash
-hf download bloomer010/Ling-3.0-tiny-GGUF \
-    Ling-3.0-tiny-UD-Q4_K_XL.gguf --local-dir /path/to/models
+hf download bloomer010/Ling-3.0-tiny-GGUF Ling-3.0-tiny-UD-Q4_K_XL.gguf --local-dir /path/to/models
 ```
 
 ```bash
@@ -111,9 +37,12 @@ docker run -d --name ling-30-tiny \
     --restart unless-stopped \
     --device /dev/dri/renderD129 \
     --group-add "$(stat -c %g /dev/dri/renderD129)" \
-    -p 8082:8082 \
+    --network host \
+    --health-cmd "curl -sf http://localhost:8082/health || exit 1" \
+    --health-interval 30s --health-timeout 5s \
+    --health-start-period 120s --health-retries 3 \
     -v /path/to/models:/models:ro \
-    ghcr.io/ggml-org/llama.cpp:server-vulkan \
+    ghcr.io/ggml-org/llama.cpp@sha256:f862c901a0089bc3dc326bd24f208bfcd147839783328d252e911a004c94ff3c \
     -m /models/Ling-3.0-tiny-UD-Q4_K_XL.gguf \
     --host 0.0.0.0 --port 8082 \
     --n-gpu-layers 999 \
@@ -126,18 +55,37 @@ docker run -d --name ling-30-tiny \
     --jinja
 ```
 
-`/health` within seconds. If it dies at load, step down one row of the
-context table.
+Loads in about two seconds.
 
-## Measurement notes
+## Rules
 
-- A throughput sample taken while requests ramp onto 2 slots (6.6 tok/s
-  under 16 concurrent) is not the single-stream rate (48.3 on real traffic).
-- A prefill probe above ~550 tokens on a FA-on server reads "connection
-  refused", not a crash. Blank metric = check the container.
+- `--flash-attn off`. With it on, one shader in the KDA/MLA Vulkan path
+  hangs the GPU on prompts over ~550 tokens (`i915 GPU HANG ... ecode
+  12:1:85def5fb`, then `ErrorDeviceLost`). Costs ~5% decode. Pass the value:
+  the flag defaults to `auto`.
+- `--cache-ram 0`. Saving slot state to the prompt cache loses the device
+  (`vk::Queue::submit: ErrorDeviceLost` from `prompt_save`). The default is
+  8192 MiB, on.
+- f16 KV both ways. Quantised V needs flash attention; quantised K alone
+  fails to load.
+- Add `--health-cmd` on the real port. The image's baked-in check curls
+  8080, so a server on any other port reads unhealthy forever.
+- Keep `--ubatch-size` at or below 2048 (defaults: batch 2048, ubatch 512).
+  llama.cpp [#27638](https://github.com/ggml-org/llama.cpp/issues/27638): on
+  Intel ANV, KDA prompt processing degrades and the device is lost above it.
+- Pass `--parallel` even for 1. The default (-1) picked four slots.
+- `--reasoning auto --reasoning-budget 1024`, not `--reasoning off`. Denied a
+  thinking channel, this hybrid model reasons in the answer channel and runs
+  past 13,000 tokens. Off alone is also overridden by any caller sending
+  `enable_thinking`.
+- `--n-predict` is a default, not a ceiling: an explicit `max_tokens` above
+  it is honoured. The reasoning budget is the defence against runaways.
+- Context budget at f16, 24 KiB/token: 65536 → 6.61 GiB, 73728 → 6.79,
+  81920 → 6.98, 98304 → 7.36 (too tight). Read `KV self size` and
+  `Vulkan0 compute buffer size` from the log rather than estimating.
+- Pin by digest. Dated `server-vulkan-bNNNNN` tags exist; the bare tag moves.
 
 ## Sources
 
-- [inclusionAI/Ling-3.0-tiny](https://huggingface.co/inclusionAI/Ling-3.0-tiny)
-- [bloomer010/Ling-3.0-tiny-GGUF](https://huggingface.co/bloomer010/Ling-3.0-tiny-GGUF)
-- [ggml-org/llama.cpp#26608](https://github.com/ggml-org/llama.cpp/pull/26608)
+- [inclusionAI/Ling-3.0-tiny](https://huggingface.co/inclusionAI/Ling-3.0-tiny), [bloomer010/Ling-3.0-tiny-GGUF](https://huggingface.co/bloomer010/Ling-3.0-tiny-GGUF)
+- [ggml-org/llama.cpp#26608](https://github.com/ggml-org/llama.cpp/pull/26608), [#27638](https://github.com/ggml-org/llama.cpp/issues/27638)

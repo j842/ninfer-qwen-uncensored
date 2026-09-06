@@ -1,52 +1,36 @@
 # Ornith-1.5-35B-A3B (NInfer, RTX 5090)
 
 shisa-ai's 35B MoE with a distilled MTP head and the z-lab DFlash draft
-model, as a single-file [NInfer](https://github.com/Neroued/ninfer) artifact.
-Not abliterated. The checkpoint is a tensor-for-tensor drop-in for NInfer's
-`qwen3_6_35b_a3b` target (all 1045 names, shapes and dtypes, including the
-19-tensor MTP head), so the 27B build pattern applies.
+model, as one [NInfer](https://github.com/Neroued/ninfer) artifact. Not
+abliterated. The checkpoint matches NInfer's `qwen3_6_35b_a3b` target tensor
+for tensor (1045 names, shapes, dtypes, MTP head included), so the 27B build
+pattern applies.
 
-Prebuilt and published, every input Apache-2.0 or MIT:
-[huggingJDE/Ornith-1.5-35B-A3B-NInfer](https://huggingface.co/huggingJDE/Ornith-1.5-35B-A3B-NInfer).
+| | |
+|---|---|
+| **Artifact** | `ornith_1_5_35b_a3b.ninfer`, 22,783,246,080 bytes, sha256 `bc58fa4900d99560904bb94987704e712091a8e72a1a91d07242313631a919a3` |
+| **Download** | [huggingJDE/Ornith-1.5-35B-A3B-NInfer](https://huggingface.co/huggingJDE/Ornith-1.5-35B-A3B-NInfer) (every input is Apache-2.0 or MIT) |
+| **Base** | [`shisa-ai/Ornith-1.5-35B-A3B-MTP`](https://huggingface.co/shisa-ai/Ornith-1.5-35B-A3B-MTP), BF16, 16 shards + `model-mtp.safetensors`, ~72 GB |
+| **DFlash** | [`z-lab/Qwen3.6-35B-A3B-DFlash`](https://huggingface.co/z-lab/Qwen3.6-35B-A3B-DFlash), ~1.7 GB, trained on base Qwen3.6-35B-A3B |
+| **Frontend** | official `Qwen/Qwen3.6-35B-A3B`, pinned in [`frontend-qwen3_6_35b_a3b.sha256`](../frontend-qwen3_6_35b_a3b.sha256) |
+| **Architecture** | 35B MoE, 256 experts, 8 active, 40 hybrid linear/full-attention layers, vision tower, 1-layer MTP, 262,144 context |
+| **Recipe** | groupwise-int `qwen3_6_35b_a3b-v2` |
+| **Engine** | NInfer `ad0f3d38` (2026-09-04), CUDA 13.1, `sm_120a` |
+| **Decode** | 415–429 tok/s single stream through a router (200-token replies); the engine logs 650–675 tok/s at 69–73% MTP acceptance |
 
-```
-sha256  bc58fa4900d99560904bb94987704e712091a8e72a1a91d07242313631a919a3
-bytes   22783246080
-file    ornith_1_5_35b_a3b.ninfer
-```
-
-Or build it:
+## Build
 
 ```bash
 ./build-ornith.sh   # → work-ornith/out/ornith_1_5_35b_a3b.ninfer
 ```
 
-| | |
-|---|---|
-| **Output** | `ornith_1_5_35b_a3b.ninfer`, 21.22 GiB |
-| **Base** | [`shisa-ai/Ornith-1.5-35B-A3B-MTP`](https://huggingface.co/shisa-ai/Ornith-1.5-35B-A3B-MTP), BF16, 16 shards + `model-mtp.safetensors`, ~72 GB. MTP head distilled from Qwen3.6-35B-A3B |
-| **DFlash** | [`z-lab/Qwen3.6-35B-A3B-DFlash`](https://huggingface.co/z-lab/Qwen3.6-35B-A3B-DFlash), ~1.7 GB, trained against base Qwen3.6-35B-A3B |
-| **Frontend** | official `Qwen/Qwen3.6-35B-A3B`, pinned in [`frontend-qwen3_6_35b_a3b.sha256`](../frontend-qwen3_6_35b_a3b.sha256) |
-| **Architecture** | 35B MoE, 256 experts, 8 active, 40 hybrid linear/full-attention layers, vision tower, 1-layer MTP, 262144 context |
-| **Recipe** | groupwise-int `qwen3_6_35b_a3b-v2` |
-| **Requirements** | [README](../README.md#building-the-ninfer-artifacts): Docker + NVIDIA runtime, ~11 GB VRAM, ~110 GB disk |
-
-## Build
-
-Same converter commit and step pattern as the
-[27B build](qwen3.8-27b-uncensored.md#build) (including the `git`-in-container
-requirement and the overrides), plus a DFlash download, in `work-ornith/`.
-Differences:
-
-- The converter requires `--dflash-model`; the artifact embeds the DFlash
-  head alongside MTP.
-- Ornith's `chat_template.jinja` keeps prior-turn `<think>` blocks. The
-  converter pins the official template, so the artifact has standard Qwen
-  behaviour.
-- The MTP head was distilled for Ornith (acceptance ~80%, ~3.4 tokens/round
-  at window 3). The DFlash head was trained on base Qwen3.6, so its
-  acceptance may be lower on this finetune. Outputs are unaffected either way;
-  speculation is verified by the target.
+Five containerised steps: converter source at the pinned commit, base
+weights, DFlash weights, graft the official frontend (Ornith's own
+`chat_template.jinja` keeps prior-turn `<think>` blocks; the converter pins
+the official one), convert with `--dflash-model`. Requirements and overrides
+are the [27B page](qwen3.8-27b-uncensored.md)'s. The published sha256 was
+produced by converter `b2b96bae`; the recipe id is unchanged at `ad0f3d38`
+but byte-identity from the newer converter has not been checked.
 
 ## Serve
 
@@ -55,34 +39,33 @@ ninfer-serve ornith_1_5_35b_a3b.ninfer \
     --model-id default \
     --host 127.0.0.1 --port 6107 \
     --max-context 262144 \
-    --max-concurrency 4 \
+    --max-concurrency 8 \
     --kv-capacity auto --kv-dtype int8 \
+    --temperature 0.6 --top-p 0.95 \
     --spec mtp --draft-tokens 3 --lm-head-draft \
     --vision
 ```
 
-Use MTP, not DFlash. `--spec dflash --draft-tokens 7` is faster on paper
-(text-only; DFlash excludes `--vision`) but an engine bug aborts long
-generations with `KV materialization exceeds active entitlement`: NInfer pads
-each request's draft KV reservation by the draft window under MTP but not
-under DFlash (`request_plan_impl.h`, `plan_request`), so a DFlash round near
-the end of the output budget can cross a 64-token KV page past its
-reservation. Larger `--draft-tokens` makes it likelier; `--kv-capacity` and
-`--kv-dtype` do not help.
+## Rules
 
-Measured on the official `qwen3_6_35b_a3b` artifact on a 5090: ~593 tok/s
-single-stream with MTP=3, ~1,314 tok/s aggregate at concurrency 8, ~271 tok/s
-with speculation off. Prefill ~13,700 tok/s into the 262,144-token window.
+- Use MTP, not DFlash. NInfer pads each request's draft KV reservation by
+  the draft window under MTP but not under DFlash, so a long DFlash
+  generation can abort with `KV materialization exceeds active entitlement`.
+- `--kv-dtype int8` is what fits full context plus the vision tower in
+  32 GB. `fp8`, `nvfp4` and `k8v4` also exist now; not measured here.
+- `--default-thinking-budget N` force-closes `<think>` at N tokens. Use it
+  instead of a proxy-side rescue if replies burn their budget thinking.
+- The API rejects `response_format` and any `chat_template_kwargs` other
+  than `enable_thinking`/`preserve_thinking`. Translate in a proxy.
+- The MTP head was distilled for Ornith; the DFlash head was not. Outputs
+  are verified by the target either way.
 
 ## Publish
-
-[`upload-ornith.sh`](../upload-ornith.sh) uploads the artifact, its conversion
-report, and the card / LICENSE / NOTICE from [`hf-ornith/`](../hf-ornith/)
-(which keep the upstream shisa-ai notices). Runs in a container because
-`work-ornith/out` is root-owned.
 
 ```bash
 HF_TOKEN=hf_...  ./upload-ornith.sh   # → <you>/Ornith-1.5-35B-A3B-NInfer
 ```
 
-`HF_REPO` overrides the name; `PRIVATE=true` creates it private.
+Uploads the artifact, its conversion report and [`hf-ornith/`](../hf-ornith/)
+(card, LICENSE, NOTICE). `HF_REPO` overrides the name; `PRIVATE=true` creates
+it private.

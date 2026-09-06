@@ -1,100 +1,76 @@
 # Qwen3.8-Flash-Next (llama.cpp, RTX 5090)
 
-The same 180B model on a 32 GB RTX 5090: llama.cpp with every routed expert
-streaming from system RAM, tail layers on the card. Full 262,144-token
-window, vision included.
-
-**42-43 tok/s decode on short prompts, 40.9 at 6K, 38.2 at 24K; prefill
-850-940 tok/s**, measured 2026-08-31, speculation off.
+The 180B model on a 32 GB RTX 5090: llama.cpp with the routed experts in
+system RAM, the last three expert layers on the card, MTP self-drafting on.
+Full 262,144-token window, vision. llama.cpp is the only engine with
+per-tensor placement (`--n-cpu-moe`); vLLM and SGLang need the ~78 GiB core
+GPU-resident. 10 of 512 experts fire per token, so DDR4 traffic is ~1.4
+GiB/token.
 
 | | |
 |---|---|
-| **Engine** | llama.cpp b10705 (`2578138397d7`) + [`maxspeed.patch`](../flash-next-5090/maxspeed.patch), built by [`build-engine.sh`](../flash-next-5090/build-engine.sh) into `llamacpp-qwen4exp:2578138397d7-p50825275` |
-| **Weights** | [`unsloth/Qwen3.8-Flash-Next-GGUF`](https://huggingface.co/unsloth/Qwen3.8-Flash-Next-GGUF) UD-Q4_K_XL, 103.7 GiB in 4 shards, revision `c8b5954a88c2775c546b92593eda40ea041d3176` (the 2026-08-28 imatrix requant; earlier uploads differ) |
+| **Engine** | llama.cpp b10819 (`74a7c897f049`) + [`maxspeed.patch`](../flash-next-5090/maxspeed.patch), image `llamacpp-qwen4exp:74a7c897f049-pff941add` |
+| **Weights** | `Qwen3.8-Flash-Next-UD-Q4_K_XL-imx-MTP-PLE8-v1.gguf`, ~130 GiB, built below from [`unsloth/Qwen3.8-Flash-Next-GGUF`](https://huggingface.co/unsloth/Qwen3.8-Flash-Next-GGUF) |
 | **Vision** | `mmproj-BF16.gguf`, 865 MiB, same repo |
-| **Card** | RTX 5090, 30.0 GiB of 31.8 at `--n-cpu-moe 43` |
-| **Host** | ~100 GiB free RAM for the mmap page cache, 48 physical cores, NVMe |
+| **Card** | RTX 5090, 30.2 GiB peak at 74K context, `--n-cpu-moe 45` |
+| **Host** | ~130 GiB free RAM for the mmap page cache, 48 physical cores, NVMe |
+| **Decode** | 52 tok/s short, 57 at 6K, 49 at 27K, 46 at 74K (spec off: 42 / 40 / 37 / 34) |
+| **Prefill** | 953 / 899 / 827 tok/s at 2K / 8K / 32K |
 
-llama.cpp is the only engine with per-tensor placement (`--n-cpu-moe`); vLLM
-and SGLang need the ~78 GiB core GPU-resident. 10 of 512 experts fire per
-token, so DDR4 traffic is ~1.4 GiB/token, not the 71.7 GiB the experts
-occupy.
+## The weights
 
-## Memory
+Three steps on top of the unsloth UD-Q4_K_XL imatrix requant
+(revision `c8b5954a`, 4 shards, 103.7 GiB):
 
-```
-GPU   5.2 GiB  non-expert tensors
-   +  0.9 GiB  vision ViT
-   +  6.0 GiB  KV at 262,144 tokens, f16 (12 of 48 layers)
-   +  6.0 GiB  compute buffers + CUDA context (ubatch 2048)
-   = 18.1 GiB  at --n-cpu-moe 48 (no experts on GPU)
-HOST 71.7 GiB  routed experts (mmap)
-   + 26.8 GiB  PLE table, IQ4_NL
-```
-
-`--n-cpu-moe N`: layers 0..N-1 experts on host, N..47 on the card. Expert
-layers are 1.46 GiB each except 2, 4, 30, 46, 47 at 1.71-1.90 GiB.
-
-| `--n-cpu-moe` | VRAM | decode | |
-|---|---|---|---|
-| 48 | 18.1 GiB | ~39.8 | floor |
-| **43** | **30.0 GiB** | **43.4** | shipped |
-| 42 | 31.7 GiB peak at 32K | 43.8 | too thin |
-| 38 | 33.2 GiB | | does not fit |
-
-Judge peak VRAM through a deep-context run, not the load line.
-
-## Quant
-
-| | UD-Q4_K_XL | UD-IQ4_XS |
-|---|---|---|
-| routed experts | 71.7 GiB: Q4_K x94, Q5_1 x43, Q8_0 x5, Q5_K x2 | 55.5 GiB: IQ3_S x94, IQ4_NL x43, Q8_0 x5, IQ4_XS x2 |
-| PLE table | 26.8 GiB, IQ4_NL | 26.8 GiB, IQ4_NL |
-| dense + shared + embed | 5.1 GiB | 4.9 GiB |
-
-UD-IQ4_XS is a 3.4-bit expert build; the bytes it saves are host RAM, and
-decode is not bandwidth-bound here (~51 of ~205 GB/s), so it is the wrong
-trade. Open question: the PLE table at 4.5 bits is the one tensor materially
-below the PRO 6000 build's FP8. A Q8_0 requant
-(`llama-quantize --tensor-type per_layer_token_embd=Q8_0`, +24 GiB host RAM)
-is untested.
-
-## Engine
-
-Base: mainline b10705, which carries [#27742](https://github.com/ggml-org/llama.cpp/pull/27742)
-(`qwen4exp`) and [#28011](https://github.com/ggml-org/llama.cpp/pull/28011)
-(kv-cells scan early exit). `maxspeed.patch` merges the still-open PRs:
-
-| PR | Head | Effect |
-|---|---|---|
-| [#27941](https://github.com/ggml-org/llama.cpp/pull/27941) | `868e2f52` | QSA blocks keyed per sequence; `gridDim.y` overflow fix at full depth; kv-unified NaN fix. Required: fixes silent logit drift on long thinking chains |
-| [#27879](https://github.com/ggml-org/llama.cpp/pull/27879) | `a7fc7e40` only | GDN QK norm as `rsqrt(sum+eps)`. Its rollback flag (`edb6dec`) is excluded: corrupts multi-sequence recurrent state ([#28019](https://github.com/ggml-org/llama.cpp/pull/28019)) |
-| [#28023](https://github.com/ggml-org/llama.cpp/pull/28023) | `ead00aed` | QSA indexer head-sum by slices (prefill) |
-| [#27977](https://github.com/ggml-org/llama.cpp/pull/27977) | `db40b22d` | QSA gather-window decode split, bitmap used-cells (depth decode). Draft PR |
-| [#27836](https://github.com/ggml-org/llama.cpp/pull/27836) | `1d8de7c1` | MTP draft head. Compiled in, off |
-| [#27861](https://github.com/ggml-org/llama.cpp/pull/27861) | `bccbacdb` | GPU LRU cache for host experts. Compiled in, off |
-
-The image tag is keyed on base commit + patch sha256. As PRs merge, drop
-their hunks; when the patch is empty, use `ghcr.io/ggml-org/llama.cpp:server-cuda`.
-
-## Build and download
+1. Export the model's own MTP head. [`fetch_mtp.py`](../flash-next-5090/fetch_mtp.py)
+   range-reads the `mtp.*` tensors (~10 GB) out of `Qwen/Qwen3.8-Flash-Next`
+   into a stub checkpoint; the patched tree's converter writes it as a GGUF.
+2. Graft it as `blk.48` with [`graft_mtp.py`](../flash-next-5090/graft_mtp.py)
+   (block_count 49, `nextn_predict_layers` 1). Needs `gguf-py` from the same
+   tree: symlink the checkout as `tree/` beside the script.
+3. Swap the PLE table from IQ4_NL (26.8 GiB) to Q8_0 (50.7 GiB) with
+   [`graft_ple.py`](../flash-next-5090/graft_ple.py). The donor is shard 3 of
+   unsloth's Q8_0 quant, which holds only that tensor, quantised once from
+   BF16. The PLE is a per-token gather, so this costs host RAM and no decode.
 
 ```bash
-./flash-next-5090/build-engine.sh   # → llamacpp-qwen4exp:2578138397d7-p50825275
-```
-
-Fetches the pinned tarball, `git apply --check` then applies the patch,
-compiles for `sm_120` only inside `nvidia/cuda:13.1.2-devel`, bakes into
-`13.1.2-runtime`. ~15 minutes. `BUILD_CPUSET=48-55` pins the compile. If CUDA
-13 fails on the pinned commit, drop both images to 12.8.1 (`sm_120` needs
->= 12.8).
-
-```bash
-hf download unsloth/Qwen3.8-Flash-Next-GGUF \
-    --revision c8b5954a88c2775c546b92593eda40ea041d3176 \
-    --include 'UD-Q4_K_XL/*' 'mmproj-BF16.gguf' \
+hf download unsloth/Qwen3.8-Flash-Next-GGUF --revision c8b5954a88c2775c546b92593eda40ea041d3176 \
+    --include 'UD-Q4_K_XL/*' 'mmproj-BF16.gguf' 'Q8_0/Qwen3.8-Flash-Next-Q8_0-00003-of-00006.gguf' \
     --local-dir /path/to/flash-next-gguf
+cd /path/to/flash-next-gguf
+python3 fetch_mtp.py --out mtp-ckpt
+python3 /path/to/llama.cpp/convert_hf_to_gguf.py mtp-ckpt --mtp --outtype q8_0 --outfile mtp-q8_0.gguf
+python3 graft_mtp.py UD-Q4_K_XL/*-0000{1,2,3,4}-of-00004.gguf mtp-q8_0.gguf merged-mtp.gguf
+python3 graft_ple.py merged-mtp.gguf Q8_0/Qwen3.8-Flash-Next-Q8_0-00003-of-00006.gguf \
+    Qwen3.8-Flash-Next-UD-Q4_K_XL-imx-MTP-PLE8-v1.gguf
 ```
+
+The plain 4-shard UD-Q4_K_XL serves unchanged with `--spec-type` left off.
+UD-IQ4_XS is the wrong trade: 94 of 144 expert tensors drop to IQ3_S, and
+decode here is not bandwidth-bound (~51 of ~205 GB/s).
+PR #28243 can also draft from unsloth's `MTP/mtp-Qwen3.8-Flash-Next-shared-Q8_0.gguf`
+sidecar via `-md`; not used here.
+
+## The engine
+
+Base b10819 carries `qwen4exp` (#27742) and the merged follow-ups (#27941,
+#28023, #28123, #28040, #27970). `maxspeed.patch` adds:
+
+| PR | Effect |
+|---|---|
+| [#28243](https://github.com/ggml-org/llama.cpp/pull/28243) | MTP draft head, `--spec-type draft-mtp`, self-draft from `blk.48` |
+| [#28068](https://github.com/ggml-org/llama.cpp/pull/28068) | GDN QK norm as `x * rsqrt(sum + eps)` |
+| [#28213](https://github.com/ggml-org/llama.cpp/pull/28213) | QSA decode attends only the indexer-selected cells. `QWEN4EXP_QSA_GATHER=0` restores the masked path |
+| unsloth [#144](https://github.com/unslothai/llama.cpp/pull/144) `5a08a717` | CUDA graph cache keyed by shape, so MTP verify batches of 2/3/4 tokens stop resetting warm-up |
+
+```bash
+./flash-next-5090/build-engine.sh   # → llamacpp-qwen4exp:74a7c897f049-pff941add, ~15 min
+```
+
+The tag is base commit + patch sha256. `BUILD_CPUSET=48-55` pins the
+compile. If CUDA 13 fails on the pinned commit, drop both images to 12.8.1
+(`sm_120` needs 12.8 or newer). Drop hunks as PRs merge; with an empty patch
+use `ghcr.io/ggml-org/llama.cpp:server-cuda`.
 
 ## Launch
 
@@ -106,82 +82,87 @@ docker run -d --name qwen38-flash-next-5090 \
     --cpuset-cpus 0-47 \
     -p 8001:8080 \
     -v /path/to/flash-next-gguf:/models:ro \
+    -v "$PWD/flash-next/chat_template.jinja:/chat_template.jinja:ro" \
     -e LLAMA_ATTN_ROT_DISABLE=1 \
-    llamacpp-qwen4exp:2578138397d7-p50825275 \
-    --model /models/UD-Q4_K_XL/Qwen3.8-Flash-Next-UD-Q4_K_XL-00001-of-00004.gguf \
+    llamacpp-qwen4exp:74a7c897f049-pff941add \
+    --model /models/Qwen3.8-Flash-Next-UD-Q4_K_XL-imx-MTP-PLE8-v1.gguf \
     --mmproj /models/mmproj-BF16.gguf \
+    --chat-template-file /chat_template.jinja \
     --alias Qwen3.8-Flash-Next \
     --host 0.0.0.0 --port 8080 \
-    -ngl 999 --n-cpu-moe 43 \
+    -ngl 999 --n-cpu-moe 45 \
     --ctx-size 262144 --parallel 1 \
     --flash-attn on --cache-type-k f16 --cache-type-v f16 \
     --threads 48 --threads-batch 48 \
     --batch-size 2048 --ubatch-size 2048 \
     --load-mode mmap \
+    --spec-type draft-mtp --spec-draft-n-max 2 \
+    --override-tensor 'blk\.48\.ffn_(up|down|gate|gate_up)_(ch|)exps=CPU' \
     --cont-batching --metrics --slots --jinja
 ```
 
-`/health` in under a minute. Experts and PLE fault in from disk on demand;
-the first requests are slow.
+`/health` in under a minute; experts and PLE fault in from disk on demand.
 
-- `--cpuset-cpus 0-47 --threads 48`: physical cores, no SMT (a measured
-  loss). llama.cpp's own `--cpu-mask` did not place threads; the docker
-  cpuset does. Anything else streaming from DDR4 roughly halves decode.
-- `--n-cpu-moe 43`: CUDA OOM at load means raise it. At 48 the budget is over
-  from the dense side: lower `--ctx-size` (~0.75 GiB per 32K), `--ubatch-size`
-  to 1024, or drop `--mmproj`.
-- `--load-mode mmap`: mlock would pin 100 GiB from the loading thread; direct
-  I/O bypasses the page cache the expert faulting needs.
-- `--ubatch-size 2048`: prefill copies host experts to the GPU per batch;
-  the big ubatch amortises PCIe and is most of the 6.0 GiB of buffers.
-- `--parallel 1`: two slots cost each stream ~29% (24.1 + 24.2 vs 33.5
-  single). `--ctx-size` is the total across slots.
+## Rules
+
+- Do not apply llama.cpp #28118 (on-device speculative checkpoints): it
+  aborts the third request, spec on or off.
+- Keep `--spec-draft-n-max 2`. 3 wins at depth and loses to spec-off on
+  low-acceptance prose (48% on 768-token prose).
+- `--n-cpu-moe 45` is the floor with MTP on: the draft context needs ~2.5 GiB
+  and 43 crash-loops on an 865 MiB `cudaMalloc` at load. CUDA OOM at load
+  means raise it; at 48 the budget is over from the dense side, so lower
+  `--ctx-size` (~0.75 GiB per 32K), `--ubatch-size` to 1024, or drop
+  `--mmproj`.
+- Physical cores only, no SMT. `--cpuset-cpus` places the threads;
+  `--cpu-mask` did not.
+- `--parallel 1`. A second slot costs each stream ~29%. `--ctx-size` is the
+  total across slots.
+- `--load-mode mmap`. mlock pins 100 GiB from the loading thread; direct I/O
+  bypasses the page cache the expert faulting needs.
+- n-gram speculation and `--moe-expert-cache` measured no gain here; both
+  off.
+- `--ubatch-size 2048`: prefill copies host experts per batch; the large
+  ubatch amortises PCIe and is most of the compute buffer.
 - `LLAMA_ATTN_ROT_DISABLE=1`: the `qwen4exp` attention path aborts at load
-  with quantised-KV rotation active. KV is f16; belt and braces.
-- The checkpoint's chat template raises on `reasoning_effort: high|max`;
-  pass `--chat-template-file` with a fork if clients send those.
-
-## Speculation: off
-
-- MTP self-draft (`--spec-type draft-mtp` on a GGUF with `blk.48` grafted)
-  corrupts output on every patch composition tried: token salad or mid-answer
-  degradation, acceptance falling from 63-66% to 3-11%, decode 15-24 tok/s,
-  VRAM 32.1 GiB. Cause per #28019: PLE convolution and QSA indexer state have
-  no rollback snapshot.
-- n-gram speculation: ~0% gain on real prompts; serialises multi-slot
-  decode. Synthetic filler accepts ~100% and reads 86 tok/s. Bench on real
-  prompts.
-- `--moe-expert-cache 64`: 41.7 tok/s warm, 1.7-5.6 cold, 31.3 GiB. The
-  same VRAM in `--n-cpu-moe 43` gives 43.4 with no cold phase.
+  with quantised-KV rotation active.
+- The vendored chat template accepts `reasoning_effort: high|max`; the
+  checkpoint's own raises on them.
+- Judge depth with a real document through `/v1/chat/completions`
+  ([`probe-chat.sh`](../flash-next-5090/probe-chat.sh)). Synthetic filler
+  EOSes at token 1 on this build and reads as decode 0.
+- Greedy output is not bit-identical spec on versus off (MUL_MAT batch
+  invariance, per the #28243 thread). Not a defect.
+- The first request after a restart can report 1–9 tok/s in the client's
+  `timings` while the server log shows the normal rate. Read the log.
+- Change the served alias on every output-affecting engine change. A grader
+  that caches answers by model identity re-uses a broken build's scores.
+- Bench until consecutive runs agree; the page cache is cold on pass one and
+  deep-context rows are still cold on pass two.
 
 ## Measured
 
-| context | decode tok/s | prefill tok/s |
+Idle box, temperature 0, single stream, `--n-cpu-moe 45`:
+
+| workload | spec off | draft-mtp n=2 (accept) |
 |---|---|---|
-| ~500 | 42.3-43.0 | |
-| ~2K | | 936 |
-| 6K | 40.9 | |
-| 8K | | 873 |
-| 24K | 38.2 | |
-| 32K | | 848 |
+| code / fix / prose, 128 tokens | 41.5 / 41.5 / 42.1 | 51.7 (86%) / 51.9 (83%) / 50.5 (79%) |
+| code / fix / prose, 768 tokens | 42.2 / 42.2 / 41.8 | 55.8 (92%) / 54.5 (84%) / 47.7 (65%) |
+| chat, 6K of real documents | 40.4 | 56.7 (90%) |
+| chat, 27K | 37.4 | 48.7 (86%) |
+| chat, 74K | 34.1 | 46.3 (89%) |
+| maths, thinking off | 40.9 | 53.5 (88%) |
 
-Measurement rules:
+Prefill 953 / 899 / 827 tok/s at 2K / 8K / 32K, unchanged by MTP.
 
-- Bench until consecutive runs agree. Cold NVMe is pass one; deep-context
-  rows are still cold on pass two (16 tok/s at 32K on pass two, 82 on pass
-  three).
-- Synthetic filler can read decode 0: the model EOSes on gibberish at token
-  1. Use [`probe-long.sh`](../flash-next-5090/probe-long.sh), which prefills
-  varied prose and asks a question: `PORT=8001 ./flash-next-5090/probe-long.sh 24000 200`.
-- Change the served alias on every output-affecting engine change. A grader
-  that caches answers by model identity re-derives a broken build's score
-  without generating a token.
+## Memory
 
-Quality: with #27941, mid-difficulty thinking scores at parity with the
-NVFP4 build. The hardest tier scores about half (19 of 55 vs 39), with
-genuine wrong answers, pointing at the 4.5-bit PLE table.
+At `--n-cpu-moe 48` (nothing on the card) the GPU holds 18.1 GiB: 5.2 dense,
+0.9 ViT, 6.0 KV at 262K f16, 6.0 compute buffers. Each expert layer moved to
+the card is 1.46 GiB (1.71–1.90 for layers 2, 4, 30, 46, 47). Host page
+cache: 71.7 GiB experts + 50.7 GiB PLE.
 
 ## Sources
 
-- [#27742](https://github.com/ggml-org/llama.cpp/pull/27742), [#27941](https://github.com/ggml-org/llama.cpp/pull/27941), [#27879](https://github.com/ggml-org/llama.cpp/pull/27879), [#28023](https://github.com/ggml-org/llama.cpp/pull/28023), [#27977](https://github.com/ggml-org/llama.cpp/pull/27977), [#27836](https://github.com/ggml-org/llama.cpp/pull/27836), [#27861](https://github.com/ggml-org/llama.cpp/pull/27861), [#28019](https://github.com/ggml-org/llama.cpp/pull/28019)
+- [#27742](https://github.com/ggml-org/llama.cpp/pull/27742), [#28243](https://github.com/ggml-org/llama.cpp/pull/28243), [#28068](https://github.com/ggml-org/llama.cpp/pull/28068), [#28213](https://github.com/ggml-org/llama.cpp/pull/28213), [#28118](https://github.com/ggml-org/llama.cpp/pull/28118)
 - [unsloth/Qwen3.8-Flash-Next-GGUF](https://huggingface.co/unsloth/Qwen3.8-Flash-Next-GGUF), [Qwen/Qwen3.8-Flash-Next](https://huggingface.co/Qwen/Qwen3.8-Flash-Next)

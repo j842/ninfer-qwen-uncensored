@@ -1,21 +1,14 @@
 #!/usr/bin/env bash
 #
-# Build the llama.cpp engine image that serves Qwen3.8-Flash-Next on an
-# RTX 5090: mainline llama.cpp at a pinned commit, plus maxspeed.patch (the
-# still-open upstream PRs this setup wants, merged onto that base), compiled
-# for sm_120 only and baked into a small CUDA runtime image.
-#
-# One-time, about 15 minutes. Nothing is installed on the host: the compile
-# runs inside a CUDA devel container, and the result is a local Docker image
+# Build the llama.cpp engine image for Qwen3.8-Flash-Next on an RTX 5090:
+# mainline llama.cpp at a pinned commit plus maxspeed.patch (#28243 MTP,
+# #28068, #28213, unsloth #144), compiled for sm_120 only, baked into a
+# small CUDA runtime image:
 #
 #   llamacpp-qwen4exp:<commit12>-p<patchsha8>
 #
-# whose tag is keyed on the base commit and the patch hash, so bumping either
-# rebuilds and the serving command in models/qwen3.8-flash-next-5090.md always
-# names exactly the engine it was measured on.
-#
-# Requirements: Docker (the NVIDIA runtime is only needed to *serve*), curl,
-# tar, sha256sum. ~2 GB of disk for the source tree and build.
+# About 15 minutes, once. Requirements: Docker (the NVIDIA runtime is needed
+# only to serve), curl, tar, sha256sum, ~2 GB of disk.
 #
 set -euo pipefail
 
@@ -23,8 +16,9 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 
 # ── Pins (override via environment) ─────────────────────────────────────────
 LLAMACPP_REPO="${LLAMACPP_REPO:-https://github.com/ggml-org/llama.cpp}"
-# b10705, 2026-08-30. Includes the merged qwen4exp PR #27742 and #28011.
-LLAMACPP_COMMIT="${LLAMACPP_COMMIT:-2578138397d7b422bb0e160efdd429976c55fb55}"
+# b10819, 2026-09-05. Carries qwen4exp (#27742) and the merged follow-ups
+# #27941, #28023, #28123, #28040, #27970.
+LLAMACPP_COMMIT="${LLAMACPP_COMMIT:-74a7c897f049c17e7080423aa2111776eff6ebbf}"
 # CUDA 13.1.2. sm_120 needs >= 12.8; if the pinned commit ever fails to
 # compile against 13.x, drop BOTH images to 12.8.1.
 BUILD_IMAGE="${BUILD_IMAGE:-nvidia/cuda:13.1.2-devel-ubuntu24.04}"

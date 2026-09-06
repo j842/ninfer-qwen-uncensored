@@ -24,7 +24,7 @@ W="${W:-$(pwd)/work-ornith}"
 # NInfer engine/converter revision. This is the converter that defines the
 # groupwise-int recipe (RECIPE_ID qwen3_6_35b_a3b-v2) and the frontend sha pins.
 NINFER_REPO="${NINFER_REPO:-https://github.com/Neroued/ninfer}"
-NINFER_COMMIT="${NINFER_COMMIT:-b2b96bae4dd88f95b9ea8126d68fae3b88caa374}" # 2026-08-18
+NINFER_COMMIT="${NINFER_COMMIT:-ad0f3d384b5cbcec4a48a3951c287b4e9831443e}" # 2026-09-04
 
 # Base weights: Ornith-1.5-35B-A3B with the MTP head distilled from
 # Qwen3.6-35B-A3B, merged into the Qwen3.6-35B-A3B checkpoint layout.
