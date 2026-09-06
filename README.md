@@ -4,11 +4,12 @@ Build recipes and serving notes for the local models we run, one page per model.
 
 Two of them are reproducible [NInfer](https://github.com/Neroued/ninfer) builds
 for the RTX 5090: one command each, from pinned public inputs, to a single
-`.ninfer` file. Two are Qwen3.8-Flash-Next, which has nothing to do with NInfer
-and is here because it is the fastest thing we serve and both setups took a
-while to get right: SGLang on an RTX PRO 6000, and llama.cpp on a 5090 with the
-experts in system RAM. The last is the other end of the range, a 7.9B MoE on an
-8 GB Intel Arc A750, where the work was in configuring around two Vulkan
+`.ninfer` file. Three are Qwen3.8-Flash-Next, which has nothing to do with
+NInfer and is here because it is the fastest thing we serve and each setup took
+a while to get right: SGLang on an RTX PRO 6000, llama.cpp on a 5090 with the
+experts in system RAM, and llama.cpp Vulkan on a 128 GB Strix Halo APU with
+no discrete GPU at all. The last is the other end of the range, a 7.9B MoE on
+an 8 GB Intel Arc A750, where the work was in configuring around two Vulkan
 crashes.
 
 | Model | Engine / card | Decode, 1 stream | Prefill | How to get it |
@@ -17,10 +18,12 @@ crashes.
 | [Ornith-1.5-35B-A3B](models/ornith-1.5-35b-a3b.md) | NInfer, RTX 5090 | ~593 tok/s | ~13,700 tok/s | [download](https://huggingface.co/huggingJDE/Ornith-1.5-35B-A3B-NInfer) or `./build-ornith.sh` |
 | [Qwen3.8-Flash-Next](models/qwen3.8-flash-next.md) | SGLang, RTX PRO 6000 | 236-324 tok/s | 11,000-12,600 tok/s | `./flash-next/fetch-patches.sh`, then the stock image |
 | [Qwen3.8-Flash-Next on a 5090](models/qwen3.8-flash-next-5090.md) | llama.cpp, RTX 5090 | 38-43 tok/s | 850-940 tok/s | `./flash-next-5090/build-engine.sh`, then a public GGUF |
+| [Qwen3.8-Flash-Next on Strix Halo](models/qwen3.8-flash-next-strix-halo.md) | llama.cpp Vulkan, Ryzen AI MAX+ 395 | 22-24 tok/s | 190-350 tok/s | `./flash-next-strix/build-engine.sh`, then a public GGUF |
 | [Ling-3.0-tiny](models/ling-3.0-tiny-a750.md) | llama.cpp Vulkan, Arc A750 8 GB | 40.5 tok/s | ~1,200 tok/s | the stock image, then a public GGUF |
 
-Prefill is the column that separates the two Flash-Next builds: the same weights
-run 13x slower at prompt processing once the experts live in system RAM.
+Prefill is the column that separates the three Flash-Next builds: the same
+model runs 13x slower at prompt processing once the experts live in system RAM,
+and 30x slower when an iGPU does all of it from unified memory.
 
 ## [Qwen3.8-27B Uncensored](models/qwen3.8-27b-uncensored.md)
 
@@ -66,6 +69,21 @@ budget per expert split, why the smaller quant is the wrong trade, the six
 upstream PRs in the patch and what each fixed, why the model's own MTP head
 must stay switched off, and how a silent logit-drift bug showed up as a
 quality score rather than a crash.
+
+## [Qwen3.8-Flash-Next on Strix Halo](models/qwen3.8-flash-next-strix-halo.md)
+
+The same model again on a Ryzen AI MAX+ 395 mini-PC: 128 GB of unified
+memory, a Radeon 8060S iGPU, no discrete card. The whole 87 GiB ROCmFP4 quant
+sits GPU-resident in GTT and llama.cpp's Vulkan backend runs it, from a
+pinned fork that is the only engine reading both the quant's tensor types and
+its per-head n-gram table. 23-24 tok/s decode on short prompts and 21.6 at
+23K, prefill 320-350 tok/s at short depth falling to 187 at 59K, at about a
+tenth of the PRO 6000's speed for a fraction of its price. The page covers the
+kernel GTT boot parameters without which the model cannot load, why two CPU
+threads replace sixteen at no cost, the ubatch size that hangs the GPU at long
+context, an environment variable the fork recommends that silently turns
+every answer into slashes, and the prompt-cache artefact that made a healthy
+server look seven times slower than it was.
 
 ## [Ling-3.0-tiny](models/ling-3.0-tiny-a750.md)
 
@@ -125,6 +143,7 @@ models/
   ornith-1.5-35b-a3b.md            NInfer build 2: the 35B MoE, published on HF
   qwen3.8-flash-next.md            SGLang on an RTX PRO 6000 (not NInfer)
   qwen3.8-flash-next-5090.md       llama.cpp on an RTX 5090 (not NInfer)
+  qwen3.8-flash-next-strix-halo.md llama.cpp Vulkan on a Strix Halo APU (not NInfer)
   ling-3.0-tiny-a750.md            llama.cpp Vulkan on an Intel Arc A750 (not NInfer)
 build.sh                           Qwen3.8-27B uncensored build (four steps)
 build-ornith.sh                    Ornith-1.5-35B-A3B MoE build (five steps)
@@ -141,7 +160,10 @@ flash-next-5090/
   build-engine.sh                  build the pinned llama.cpp + patch into an image
   maxspeed.patch                   the six upstream llama.cpp PRs, merged onto b10705
   Dockerfile.runtime               the small CUDA runtime image it bakes
-  probe-long.sh                    deep-prefill coherence probe
+  probe-long.sh                    deep-prefill coherence probe (also used by the Strix page)
+flash-next-strix/
+  build-engine.sh                  build the pinned Vulkan fork into an image
+  Dockerfile                       the two-stage build it runs: LunarG SDK, then kisak Mesa
 get-docker.sh                      vendored get.docker.com installer
 ```
 
@@ -171,6 +193,15 @@ llama.cpp and its pull requests are MIT.
   #27742, #27836, #27861, #27879, #27941, #27977 and #28023 for the `qwen4exp`
   architecture and the fixes vendored in `maxspeed.patch`, and
   [unsloth](https://huggingface.co/unsloth) for the UD-Q4_K_XL GGUF.
+- [LaurentZuijdwijk/llama.cpp](https://github.com/LaurentZuijdwijk/llama.cpp)
+  for the `vulkan/qwen4exp-rocmfpx` fork that reads the ROCmFP4 tensor types
+  and the per-head PLE layout,
+  [charlie12345/ROCmFPX](https://github.com/charlie12345/ROCmFPX) for the
+  format itself,
+  [`agentionai/Qwen3.8-Flash-Next-ROCmFP4-FAST-imatrix-GGUF`](https://huggingface.co/agentionai/Qwen3.8-Flash-Next-ROCmFP4-FAST-imatrix-GGUF)
+  for the quant and its Strix Halo measurements, and the
+  [kisak-mesa PPA](https://launchpad.net/~kisak/+archive/ubuntu/kisak-mesa)
+  for a RADV that knows about the GPU.
 - [`inclusionAI/Ling-3.0-tiny`](https://huggingface.co/inclusionAI/Ling-3.0-tiny)
   for the small hybrid-linear MoE, llama.cpp PR
   [#26608](https://github.com/ggml-org/llama.cpp/pull/26608) for `bailingmoe3`
