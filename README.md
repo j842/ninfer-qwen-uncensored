@@ -1,4 +1,4 @@
-# ninfer-qwen-uncensored
+# Local LLM setups, September 2026
 
 Build recipes and serving configs for the local models we run, one page per
 setup: pins, commands, flags, measured numbers.
