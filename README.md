@@ -1,210 +1,89 @@
 # ninfer-qwen-uncensored
 
-Build recipes and serving notes for the local models we run, one page per model.
+Build recipes and serving configs for the local models we run, one page per
+setup. Each page is the current configuration: pins, commands, flags, measured
+numbers.
 
-Two of them are reproducible [NInfer](https://github.com/Neroued/ninfer) builds
-for the RTX 5090: one command each, from pinned public inputs, to a single
-`.ninfer` file. Three are Qwen3.8-Flash-Next, which has nothing to do with
-NInfer and is here because it is the fastest thing we serve and each setup took
-a while to get right: SGLang on an RTX PRO 6000, llama.cpp on a 5090 with the
-experts in system RAM, and llama.cpp Vulkan on a 128 GB Strix Halo APU with
-no discrete GPU at all. The last is the other end of the range, a 7.9B MoE on
-an 8 GB Intel Arc A750, where the work was in configuring around two Vulkan
-crashes.
-
-| Model | Engine / card | Decode, 1 stream | Prefill | How to get it |
+| Model | Engine / hardware | Decode, 1 stream | Prefill | Get it |
 |---|---|---|---|---|
-| [Qwen3.8-27B Uncensored](models/qwen3.8-27b-uncensored.md) | NInfer, RTX 5090 | dense 27B, not benchmarked here | not benchmarked here | build it: `./build.sh` |
+| [Qwen3.8-27B Uncensored](models/qwen3.8-27b-uncensored.md) | NInfer, RTX 5090 | not benchmarked | not benchmarked | `./build.sh` |
 | [Ornith-1.5-35B-A3B](models/ornith-1.5-35b-a3b.md) | NInfer, RTX 5090 | ~593 tok/s | ~13,700 tok/s | [download](https://huggingface.co/huggingJDE/Ornith-1.5-35B-A3B-NInfer) or `./build-ornith.sh` |
-| [Qwen3.8-Flash-Next](models/qwen3.8-flash-next.md) | SGLang, RTX PRO 6000 | 236-324 tok/s | 11,000-12,600 tok/s | `./flash-next/fetch-patches.sh`, then the stock image |
-| [Qwen3.8-Flash-Next on a 5090](models/qwen3.8-flash-next-5090.md) | llama.cpp, RTX 5090 | 38-43 tok/s | 850-940 tok/s | `./flash-next-5090/build-engine.sh`, then a public GGUF |
-| [Qwen3.8-Flash-Next on Strix Halo](models/qwen3.8-flash-next-strix-halo.md) | llama.cpp Vulkan, Ryzen AI MAX+ 395 | 22-24 tok/s | 190-350 tok/s | `./flash-next-strix/build-engine.sh`, then a public GGUF |
-| [Ling-3.0-tiny](models/ling-3.0-tiny-a750.md) | llama.cpp Vulkan, Arc A750 8 GB | 40.5 tok/s | ~1,200 tok/s | the stock image, then a public GGUF |
+| [Qwen3.8-Flash-Next](models/qwen3.8-flash-next.md) | SGLang, RTX PRO 6000 | 236-324 tok/s | 11,000-12,600 tok/s | `./flash-next/fetch-patches.sh` + stock image |
+| [Qwen3.8-Flash-Next, 5090](models/qwen3.8-flash-next-5090.md) | llama.cpp, RTX 5090 + system RAM | 38-43 tok/s | 850-940 tok/s | `./flash-next-5090/build-engine.sh` + public GGUF |
+| [Qwen3.8-Flash-Next, Strix Halo](models/qwen3.8-flash-next-strix-halo.md) | llama.cpp Vulkan, Ryzen AI MAX+ 395 | 22-24 tok/s | 190-350 tok/s | `./flash-next-strix/build-engine.sh` + public GGUF |
+| [Ling-3.0-tiny](models/ling-3.0-tiny-a750.md) | llama.cpp Vulkan, Arc A750 8 GB | 40.5 tok/s | ~1,200 tok/s | stock image + public GGUF |
 
-Prefill is the column that separates the three Flash-Next builds: the same
-model runs 13x slower at prompt processing once the experts live in system RAM,
-and 30x slower when an iGPU does all of it from unified memory.
-
-## [Qwen3.8-27B Uncensored](models/qwen3.8-27b-uncensored.md)
-
-An abliterated Qwen3.8-27B packed into a 16.96 GiB NInfer artifact: text and
-vision, thinking mode, MTP speculation, 262K context on one 5090. "Abliterated"
-means the refusal direction has been removed from the weights, so it does not
-decline requests the way the instruct model does. That work was already done
-and published by someone else; this repo only re-packages those weights.
-Deliberately not redistributed, so you build it yourself. Takes about ten
-minutes of GPU time on top of a 55 GB download.
-
-## [Ornith-1.5-35B-A3B](models/ornith-1.5-35b-a3b.md)
-
-shisa-ai's 35B MoE (256 experts, 8 active) with an MTP head distilled for it,
-plus the z-lab DFlash draft model, in a 21.22 GiB artifact. Not abliterated. It
-is in this repo because the checkpoint is an exact drop-in for NInfer's
-registered `qwen3_6_35b_a3b` target, so the same build pattern applies with one
-extra download step. Every input is Apache-2.0 or MIT, so the built artifact is
-published: **[huggingJDE/Ornith-1.5-35B-A3B-NInfer](https://huggingface.co/huggingJDE/Ornith-1.5-35B-A3B-NInfer)**.
-By a distance the faster of the two 5090 builds: ~593 tok/s of decode with MTP
-speculation on, prefilling at ~13,700 tok/s.
-
-## [Qwen3.8-Flash-Next](models/qwen3.8-flash-next.md)
-
-Not NInfer, not a 5090, and there is no artifact to download. The Qwen4
-architecture preview (180B total, 6B active, 512 experts, 262K context) served
-by SGLang on one RTX PRO 6000 Blackwell, with a seven-piece patch stack applied
-to the stock image at container start. 257 tok/s prose and 324 tok/s code at
-shallow depth, still 236 / 288 at 250K tokens of context, and prefill of
-11,000-12,600 tok/s that barely moves across that whole range. The page covers the
-patch stack, the full launch command, the measured VRAM budget, and the silent
-output corruption that a health check will not catch.
-
-## [Qwen3.8-Flash-Next on a 5090](models/qwen3.8-flash-next-5090.md)
-
-The same model on a 32 GB RTX 5090, which no GPU-resident engine can do: a
-pinned mainline llama.cpp plus one vendored patch, with every routed expert
-streaming from system RAM and the tail five layers on the card. 42-43 tok/s
-on short prompts and 38 at 24K tokens of context, prefill 850-940 tok/s, the
-full 262K window, vision included, off a public unsloth GGUF. Needs about 100 GB of free host
-RAM and as many physical cores as you can spare. The page covers the VRAM
-budget per expert split, why the smaller quant is the wrong trade, the six
-upstream PRs in the patch and what each fixed, why the model's own MTP head
-must stay switched off, and how a silent logit-drift bug showed up as a
-quality score rather than a crash.
-
-## [Qwen3.8-Flash-Next on Strix Halo](models/qwen3.8-flash-next-strix-halo.md)
-
-The same model again on a Ryzen AI MAX+ 395 mini-PC: 128 GB of unified
-memory, a Radeon 8060S iGPU, no discrete card. The whole 87 GiB ROCmFP4 quant
-sits GPU-resident in GTT and llama.cpp's Vulkan backend runs it, from a
-pinned fork that is the only engine reading both the quant's tensor types and
-its per-head n-gram table. 23-24 tok/s decode on short prompts and 21.6 at
-23K, prefill 320-350 tok/s at short depth falling to 187 at 59K, at about a
-tenth of the PRO 6000's speed for a fraction of its price. The page covers the
-kernel GTT boot parameters without which the model cannot load, why two CPU
-threads replace sixteen at no cost, the ubatch size that hangs the GPU at long
-context, an environment variable the fork recommends that silently turns
-every answer into slashes, and the prompt-cache artefact that made a healthy
-server look seven times slower than it was.
-
-## [Ling-3.0-tiny](models/ling-3.0-tiny-a750.md)
-
-The cheap end: inclusionAI's Ling-3.0-tiny (7.9B total, 1.3B active, 128
-routed experts, a 3:1 stack of KDA and MLA attention) on an 8 GB Intel Arc
-A750, llama.cpp Vulkan. Stock `ghcr.io/ggml-org/llama.cpp:server-vulkan` and
-one public GGUF, with nothing to build since `bailingmoe3` went upstream.
-40.5 tok/s decode, 1217 tok/s prefill, a 73,728-token window in 6.79 GiB of 8,
-and a quality score that puts the 8 GB card above a 24 GB one running a model
-three times the size. The page is mostly the two Vulkan-on-Arc landmines that
-present as broken hardware: flash attention hangs the GPU on prompts over about
-550 tokens, and the server prompt cache loses the device on the first slot-state
-save. Plus why a hybrid reasoning model needs a thinking budget rather than a
-thinking switch.
+The two NInfer rows are reproducible one-command builds to a single `.ninfer`
+file. The three Flash-Next rows are the same 180B model on three price points.
+Ling is the cheap end.
 
 ## Building the NInfer artifacts
 
-Both builds have the same requirements.
+- Docker with the NVIDIA container runtime. The host needs only `curl` and
+  `python3`. [`get-docker.sh`](get-docker.sh) is the vendored get.docker.com
+  installer: `sudo sh get-docker.sh`.
+- A CUDA GPU with ~11 GB free for the quantise step, any card. `DEVICE=cpu`
+  works, slower.
+- Disk: ~90 GB for Qwen3.8-27B, ~110 GB for Ornith.
+- Serving needs an RTX 5090: NInfer targets `sm_120a` only.
 
-- **Docker** with the **NVIDIA container runtime** (`--gpus` support). Every
-  heavy step runs in a pinned container; the host itself only needs `curl` and
-  `python3`. No Docker? [`get-docker.sh`](get-docker.sh) is the official
-  convenience script from get.docker.com, vendored so the build has no other
-  host dependency: `sudo sh get-docker.sh`.
-- A CUDA GPU with **~11 GB of free VRAM** for the quantise step. Any card, not
-  necessarily the 5090 you serve on (the reference build used a 5060 Ti). No
-  GPU? `DEVICE=cpu` works: slower, but it cannot OOM and needs no NVIDIA
-  runtime.
-- Free disk: about 90 GB for Qwen3.8-27B, about 110 GB for Ornith.
-- To *serve* the result you need an actual **RTX 5090**. NInfer targets
-  `sm_120a` only.
-
-NInfer is a C++/CUDA inference engine built exclusively for the 5090
-(Blackwell, `sm_120a`). It does not load Hugging Face checkpoints. It serves a
-`.ninfer` artifact: one file carrying the quantised weights, the MTP
-speculation head, the vision tower, and the tokenizer/chat-template frontend.
-Both builds run NInfer's own converter over public weights, deterministically
-and from scratch, so you can rebuild either yourself from pinned inputs.
+NInfer is a C++/CUDA engine for the 5090. It serves a `.ninfer` file carrying
+quantised weights, the MTP head, the vision tower and the tokenizer/chat
+template. Both builds run NInfer's converter over public weights from pinned
+inputs.
 
 ## Responsible use
 
-The base model of the Qwen3.8-27B build is already abliterated and already
-public. This repo does not create that capability, it converts existing public
-weights into a different serving format for self-hosting. An uncensored model
-will follow instructions a safety-trained one refuses, which makes **you**
-responsible for what you ask it to do and for what you expose it to. Don't put
-an unfiltered model in front of untrusted users or the public without your own
-guardrails, and comply with the base model's and Qwen's licences and with the
-law where you operate. Provided as-is, for research and self-hosting.
+The Qwen3.8-27B build starts from weights that are already abliterated and
+public; this repo converts them to another serving format. An uncensored model
+follows instructions a safety-trained one refuses. You are responsible for
+what you ask it and who you expose it to. Do not put it in front of untrusted
+users without your own guardrails. Comply with the base model's and Qwen's
+licences and local law. Provided as-is.
 
 ## Layout
 
 ```
 README.md                          this file
 models/
-  qwen3.8-27b-uncensored.md        NInfer build 1: the abliterated dense 27B
-  ornith-1.5-35b-a3b.md            NInfer build 2: the 35B MoE, published on HF
-  qwen3.8-flash-next.md            SGLang on an RTX PRO 6000 (not NInfer)
-  qwen3.8-flash-next-5090.md       llama.cpp on an RTX 5090 (not NInfer)
-  qwen3.8-flash-next-strix-halo.md llama.cpp Vulkan on a Strix Halo APU (not NInfer)
-  ling-3.0-tiny-a750.md            llama.cpp Vulkan on an Intel Arc A750 (not NInfer)
-build.sh                           Qwen3.8-27B uncensored build (four steps)
-build-ornith.sh                    Ornith-1.5-35B-A3B MoE build (five steps)
+  qwen3.8-27b-uncensored.md        NInfer: abliterated dense 27B
+  ornith-1.5-35b-a3b.md            NInfer: 35B MoE, published on HF
+  qwen3.8-flash-next.md            SGLang on an RTX PRO 6000
+  qwen3.8-flash-next-5090.md       llama.cpp on an RTX 5090
+  qwen3.8-flash-next-strix-halo.md llama.cpp Vulkan on a Strix Halo APU
+  ling-3.0-tiny-a750.md            llama.cpp Vulkan on an Intel Arc A750
+build.sh                           Qwen3.8-27B uncensored build
+build-ornith.sh                    Ornith build
 upload-ornith.sh                   publish the Ornith artifact to Hugging Face
 hf-ornith/                         HF model card, LICENCE, NOTICE for that upload
 verify_frontend.py                 sha256 pin check for the grafted frontend
-frontend.sha256                    the six official Qwen3.8-27B frontend pins
-frontend-qwen3_6_35b_a3b.sha256    the six official Qwen3.6-35B-A3B frontend pins
+frontend.sha256                    Qwen3.8-27B frontend pins
+frontend-qwen3_6_35b_a3b.sha256    Qwen3.6-35B-A3B frontend pins
 flash-next/
   fetch-patches.sh                 fetch + verify the sm_120 patch stack
-  patches.sha256                   its seven sha256 pins, at a pinned commit
+  patches.sha256                   its sha256 pins
   sm120-patch.py                   apply the stack inside the SGLang container
 flash-next-5090/
-  build-engine.sh                  build the pinned llama.cpp + patch into an image
-  maxspeed.patch                   the six upstream llama.cpp PRs, merged onto b10705
-  Dockerfile.runtime               the small CUDA runtime image it bakes
-  probe-long.sh                    deep-prefill coherence probe (also used by the Strix page)
+  build-engine.sh                  pinned llama.cpp + patch into a CUDA image
+  maxspeed.patch                   six upstream PRs merged onto b10705
+  Dockerfile.runtime               the CUDA runtime image
+  probe-long.sh                    deep-prefill coherence probe (any llama-server)
 flash-next-strix/
-  build-engine.sh                  build the pinned Vulkan fork into an image
-  Dockerfile                       the two-stage build it runs: LunarG SDK, then kisak Mesa
+  build-engine.sh                  pinned Vulkan fork into an image
+  Dockerfile                       LunarG SDK build stage, kisak Mesa runtime
 get-docker.sh                      vendored get.docker.com installer
 ```
 
-`flash-next/patches/` is fetched, not committed: the upstream patch repository
-carries no licence, so this repo pins the files by sha256 instead of
-redistributing them. `flash-next-5090/maxspeed.patch` is committed, because
-llama.cpp and its pull requests are MIT.
+`flash-next/patches/` is fetched, not committed: upstream carries no licence.
+`flash-next-5090/maxspeed.patch` is committed: llama.cpp and its PRs are MIT.
 
 ## Credits
 
-- [NInfer](https://github.com/Neroued/ninfer) for the 5090 engine, converter,
-  and groupwise-int recipes.
-- [Qwen](https://huggingface.co/Qwen) for the Qwen3.8-27B, Qwen3.6-35B-A3B and
-  Qwen3.8-Flash-Next base models and frontend resources.
-- [`JonathanColetti/Qwen3.8-27B-Uncensored`](https://huggingface.co/JonathanColetti/Qwen3.8-27B-Uncensored)
-  for the abliterated base weights.
-- [`shisa-ai/Ornith-1.5-35B-A3B-MTP`](https://huggingface.co/shisa-ai/Ornith-1.5-35B-A3B-MTP)
-  for Ornith with the distilled MTP head, merged into the Qwen3.6-35B-A3B
-  checkpoint layout.
-- [`z-lab/Qwen3.6-35B-A3B-DFlash`](https://huggingface.co/z-lab/Qwen3.6-35B-A3B-DFlash)
-  for the DFlash draft model.
-- [SGLang](https://github.com/sgl-project/sglang),
-  [gabrielolympie](https://github.com/gabrielolympie/sglang-flashnext-sm120)
-  and [jpezzulli](https://github.com/jpezzulli/sglang-rtxpro6000) for the
-  Flash-Next engine and the sm_120 patch stack.
-- [llama.cpp](https://github.com/ggml-org/llama.cpp) and the authors of PRs
-  #27742, #27836, #27861, #27879, #27941, #27977 and #28023 for the `qwen4exp`
-  architecture and the fixes vendored in `maxspeed.patch`, and
-  [unsloth](https://huggingface.co/unsloth) for the UD-Q4_K_XL GGUF.
-- [LaurentZuijdwijk/llama.cpp](https://github.com/LaurentZuijdwijk/llama.cpp)
-  for the `vulkan/qwen4exp-rocmfpx` fork that reads the ROCmFP4 tensor types
-  and the per-head PLE layout,
-  [charlie12345/ROCmFPX](https://github.com/charlie12345/ROCmFPX) for the
-  format itself,
-  [`agentionai/Qwen3.8-Flash-Next-ROCmFP4-FAST-imatrix-GGUF`](https://huggingface.co/agentionai/Qwen3.8-Flash-Next-ROCmFP4-FAST-imatrix-GGUF)
-  for the quant and its Strix Halo measurements, and the
-  [kisak-mesa PPA](https://launchpad.net/~kisak/+archive/ubuntu/kisak-mesa)
-  for a RADV that knows about the GPU.
-- [`inclusionAI/Ling-3.0-tiny`](https://huggingface.co/inclusionAI/Ling-3.0-tiny)
-  for the small hybrid-linear MoE, llama.cpp PR
-  [#26608](https://github.com/ggml-org/llama.cpp/pull/26608) for `bailingmoe3`
-  support, and
-  [`bloomer010/Ling-3.0-tiny-GGUF`](https://huggingface.co/bloomer010/Ling-3.0-tiny-GGUF)
-  for the quant that carries the SwiGLU-clamp metadata fix.
+- [NInfer](https://github.com/Neroued/ninfer): engine, converter, recipes.
+- [Qwen](https://huggingface.co/Qwen): base models and frontends.
+- [JonathanColetti/Qwen3.8-27B-Uncensored](https://huggingface.co/JonathanColetti/Qwen3.8-27B-Uncensored): abliterated weights.
+- [shisa-ai/Ornith-1.5-35B-A3B-MTP](https://huggingface.co/shisa-ai/Ornith-1.5-35B-A3B-MTP) and [z-lab/Qwen3.6-35B-A3B-DFlash](https://huggingface.co/z-lab/Qwen3.6-35B-A3B-DFlash).
+- [SGLang](https://github.com/sgl-project/sglang), [gabrielolympie](https://github.com/gabrielolympie/sglang-flashnext-sm120), [jpezzulli](https://github.com/jpezzulli/sglang-rtxpro6000): the sm_120 patch stack.
+- [llama.cpp](https://github.com/ggml-org/llama.cpp) and the authors of PRs #27742, #27836, #27861, #27879, #27941, #27977, #28023; [unsloth](https://huggingface.co/unsloth) for the UD-Q4_K_XL GGUF.
+- [LaurentZuijdwijk/llama.cpp](https://github.com/LaurentZuijdwijk/llama.cpp), [charlie12345/ROCmFPX](https://github.com/charlie12345/ROCmFPX), [agentionai](https://huggingface.co/agentionai/Qwen3.8-Flash-Next-ROCmFP4-FAST-imatrix-GGUF), [kisak-mesa](https://launchpad.net/~kisak/+archive/ubuntu/kisak-mesa): the Strix Halo stack.
+- [inclusionAI/Ling-3.0-tiny](https://huggingface.co/inclusionAI/Ling-3.0-tiny), llama.cpp PR [#26608](https://github.com/ggml-org/llama.cpp/pull/26608), [bloomer010/Ling-3.0-tiny-GGUF](https://huggingface.co/bloomer010/Ling-3.0-tiny-GGUF).
