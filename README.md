@@ -9,11 +9,12 @@ setup: pins, commands, flags, measured numbers.
 | [Ornith-1.5-35B-A3B](models/ornith-1.5-35b-a3b.md) | NInfer, RTX 5090 | 415–429 tok/s via a router; 650–675 engine-reported | ~13,700 tok/s | [download](https://huggingface.co/huggingJDE/Ornith-1.5-35B-A3B-NInfer) or `./build-ornith.sh` |
 | [Qwen3.8-Flash-Next](models/qwen3.8-flash-next.md) | SGLang, RTX PRO 6000 | 236–324 tok/s | 11,000–12,600 tok/s | `./flash-next/fetch-patches.sh` + stock image |
 | [Qwen3.8-Flash-Next, 5090](models/qwen3.8-flash-next-5090.md) | llama.cpp, RTX 5090 + system RAM, MTP on | 46–57 tok/s | 830–950 tok/s | `./flash-next-5090/build-engine.sh` + a grafted GGUF |
+| [Qwen3.8-Flash-Next, 3090 + EPYC](models/qwen3.8-flash-next-3090-epyc.md) | llama.cpp, RTX 3090 + 512 GB DDR4 over 4 NUMA nodes, MTP on | 26–30 tok/s | 500–610 tok/s | `./flash-next-3090/build-engine.sh` + the same grafted GGUF |
 | [Qwen3.8-Flash-Next, Strix Halo](models/qwen3.8-flash-next-strix-halo.md) | llama.cpp Vulkan, Ryzen AI MAX+ 395 | 22–24 tok/s | 190–350 tok/s | `./flash-next-strix/build-engine.sh` + public GGUF |
 | [Ling-3.0-tiny](models/ling-3.0-tiny-a750.md) | llama.cpp Vulkan, Arc A750 8 GB | 40.5 tok/s | ~1,200 tok/s | pinned stock image + public GGUF |
 
 The two NInfer rows are one-command builds to a single `.ninfer` file. The
-three Flash-Next rows are the same 180B model at three price points. Ling is
+four Flash-Next rows are the same 180B model at four price points. Ling is
 the cheap end.
 
 ## Building the NInfer artifacts
@@ -49,6 +50,7 @@ models/
   ornith-1.5-35b-a3b.md            NInfer: 35B MoE, published on HF
   qwen3.8-flash-next.md            SGLang on an RTX PRO 6000
   qwen3.8-flash-next-5090.md       llama.cpp on an RTX 5090
+  qwen3.8-flash-next-3090-epyc.md  llama.cpp on an RTX 3090 + 4-node EPYC
   qwen3.8-flash-next-strix-halo.md llama.cpp Vulkan on a Strix Halo APU
   ling-3.0-tiny-a750.md            llama.cpp Vulkan on an Intel Arc A750
 build.sh                           Qwen3.8-27B uncensored build
@@ -71,6 +73,10 @@ flash-next-5090/
   graft_mtp.py                     graft the converted head into the GGUF as blk.48
   graft_ple.py                     swap the PLE table for unsloth's Q8_0 copy
   probe-chat.sh                    deep-context probe through /v1/chat/completions (any llama-server)
+flash-next-3090/
+  build-engine.sh                  the 5090 patch stack + #28330, sm_86, numactl baked in
+  28330-indexer-vcache.patch       skip the QSA indexer's unused V cache
+  Dockerfile.runtime               CUDA runtime image with numactl (multi-NUMA hosts)
 flash-next-strix/
   build-engine.sh                  pinned Vulkan fork into an image
   Dockerfile                       LunarG SDK build stage, kisak Mesa runtime
