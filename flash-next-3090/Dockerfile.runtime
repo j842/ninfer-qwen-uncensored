@@ -1,0 +1,81 @@
+# Runtime image for the llama-server binary compiled by install-pre.sh, which
+# builds it in a CUDA devel container so the compile can be CPU-pinned (docker
+# buildkit offers no --cpuset-cpus). Context is the checked-out llama.cpp
+# source tree with build/bin/ populated. The binary is statically linked
+# against llama/ggml (BUILD_SHARED_LIBS=OFF); only the CUDA runtime libraries
+# (present in the base) and libgomp are dynamic.
+#
+# ── This image also carries numactl, and that is not incidental ─────────────
+# The 5090 sibling keeps its engine image bare, because Milan is one NUMA node.
+# naples is four, and this worker runs --load-mode none, which puts 103.7 GiB
+# of weights in ANONYMOUS memory. Anonymous pages are placed by the faulting
+# thread's mempolicy and llama.cpp populates them from ONE loading thread, so
+# without an interleave policy the lot lands on one or two nodes: the DeepSeek
+# worker on this host measured 0.0/83.6/54.8/0.1 GiB and 8.35 tok/s against
+# 19.8/39.6/39.6/39.6 and 16.09 once the server process carried the policy.
+# Same binary, same flags, 2x the decode.
+#
+# The Ornith template does this with a SECOND image layered on the upstream
+# ghcr tag (its app/Dockerfile). That indirection is not needed here: this
+# image is built locally anyway, and its base is Ubuntu 24.04, which is what
+# the from-source numactl build needs. One image instead of two also removes a
+# whole class of "which image is actually running" mistakes.
+#
+# WHY numactl IS BUILT FROM SOURCE. --weighted-interleave landed in numactl
+# 2.0.19; Ubuntu 24.04 packages 2.0.18, which answers "unrecognized option".
+# The host's own numactl IS 2.0.19 but cannot be bind-mounted in — naples runs
+# Debian 13 (glibc 2.41) against this image's 2.39, so a host binary will not
+# load. Building inside the base image is what guarantees the ABI matches.
+# (This template's MEMPOLICY is plain "interleave", which 2.0.18 would handle,
+# but the version is kept in step with the rest of the naples lineage so the
+# asymmetric-DIMM fallback in install-pre.sh's warning stays available.)
+#
+# The base ENTRYPOINT is left as llama-server. start.sh overrides it per-run
+# with --entrypoint /usr/local/bin/numactl and re-reads this value via docker
+# inspect, so the same image works with or without the wrapper. Do not remove
+# it, and do not hardcode the path in start.sh.
+#
+# AFTER THE ROME CPU SWAP the numactl half becomes dead weight: Rome puts all
+# eight channels behind one I/O die, so there is no placement problem to solve.
+# Set MEMPOLICY="" in service.env and this layer simply goes unused; strip it
+# from the Dockerfile at leisure. See UPGRADE.md.
+ARG RUNTIME_IMAGE=nvidia/cuda:13.1.2-runtime-ubuntu24.04
+FROM ${RUNTIME_IMAGE}
+
+ARG NUMACTL_VERSION=2.0.19
+ARG DEBIAN_FRONTEND=noninteractive
+
+# Deliberately ahead of the COPY below: this layer depends only on the base
+# image and NUMACTL_VERSION, so it caches across every engine rebuild.
+#
+# Build deps are NOT purged. `apt-get autoremove` after purging build-essential
+# is liable to take libstdc++/libgomp with it and break the CUDA runtime, and
+# this image is never pushed anywhere — size is irrelevant.
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends \
+      ca-certificates curl libgomp1 \
+      build-essential autoconf automake libtool \
+ && curl -fsSL -o /tmp/numactl.tar.gz \
+      "https://github.com/numactl/numactl/archive/refs/tags/v${NUMACTL_VERSION}.tar.gz" \
+ && tar -xzf /tmp/numactl.tar.gz -C /tmp \
+ && cd "/tmp/numactl-${NUMACTL_VERSION}" \
+ && ./autogen.sh \
+ && ./configure --prefix=/usr/local \
+ && make -j"$(nproc)" \
+ && make install \
+ && ldconfig \
+ && cd / && rm -rf /tmp/numactl.tar.gz "/tmp/numactl-${NUMACTL_VERSION}" \
+ && rm -rf /var/lib/apt/lists/* \
+ && /usr/local/bin/numactl --help 2>&1 | grep -q -- --weighted-interleave
+# The check above greps for the OPTION rather than exercising it. Do NOT change
+# it to `numactl --interleave=all true`: docker build RUN steps get the default
+# seccomp profile WITHOUT CAP_SYS_NICE, so set_mempolicy is blocked and the
+# build fails with "Operation not permitted" even though the binary is fine.
+# That cost one aborted install on the DeepSeek worker on 2026-08-15.
+# install-pre.sh does the real runtime check, with --cap-add SYS_NICE.
+
+COPY build/bin/llama-server /usr/local/bin/llama-server
+
+WORKDIR /workspace
+STOPSIGNAL SIGTERM
+ENTRYPOINT ["/usr/local/bin/llama-server"]
